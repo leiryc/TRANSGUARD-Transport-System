@@ -1,0 +1,695 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function userRole(role) {
+      return signedIn()
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.userType == role;
+    }
+
+    function isApprovedDriver() {
+      return userRole('driver')
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isApproved == true;
+    }
+
+    function noActiveDriverRide(driverId) {
+      return !exists(/databases/$(database)/documents/driver_presence/$(driverId))
+        || !('activeRideId' in get(/databases/$(database)/documents/driver_presence/$(driverId)).data)
+        || get(/databases/$(database)/documents/driver_presence/$(driverId)).data.activeRideId == null;
+    }
+
+    function isRideParticipant() {
+      return signedIn()
+        && (resource.data.passengerId == request.auth.uid
+          || resource.data.driverId == request.auth.uid);
+    }
+
+    function validDriverPresenceLocation(data) {
+      return data.location is latlng
+        && data.locationAccuracyMeters is number
+        && data.locationAccuracyMeters >= 0
+        && data.locationAccuracyMeters <= 1000
+        && data.updatedAt is timestamp
+        && data.updatedAt <= request.time
+        && data.updatedAt > request.time - duration.value(60, 's');
+    }
+
+    function validRideCoordinates(data) {
+      return data.pickupLat is number
+        && data.pickupLat >= -90
+        && data.pickupLat <= 90
+        && data.pickupLng is number
+        && data.pickupLng >= -180
+        && data.pickupLng <= 180
+        && data.dropoffLat is number
+        && data.dropoffLat >= -90
+        && data.dropoffLat <= 90
+        && data.dropoffLng is number
+        && data.dropoffLng >= -180
+        && data.dropoffLng <= 180;
+    }
+
+    function isWithinFlatFareZone(data) {
+      return data.pickupLat is number
+        && data.pickupLng is number
+        && data.dropoffLat is number
+        && data.dropoffLng is number
+        && (
+          ((data.pickupLat - 8.5050281) * 110.62)
+            * ((data.pickupLat - 8.5050281) * 110.62)
+          + ((data.pickupLng - 125.9771179) * 110.29)
+            * ((data.pickupLng - 125.9771179) * 110.29)
+        ) <= 1
+        && (
+          ((data.dropoffLat - 8.5050281) * 110.62)
+            * ((data.dropoffLat - 8.5050281) * 110.62)
+          + ((data.dropoffLng - 125.9771179) * 110.29)
+            * ((data.dropoffLng - 125.9771179) * 110.29)
+        ) <= 1;
+    }
+
+    function validZoneFare(data) {
+      return data.distance is number
+        && data.estimatedPrice is number
+        && (
+          (isWithinFlatFareZone(data) && data.estimatedPrice == 15)
+          || (
+            !isWithinFlatFareZone(data)
+            && data.estimatedPrice >= 15 + (8 * data.distance) - 0.005
+            && data.estimatedPrice <= 15 + (8 * data.distance) + 0.005
+          )
+        );
+    }
+
+    function validLegacyFare(fare, distance) {
+      return fare is number
+        && distance is number
+        && fare >= 15 + (8 * distance) - 0.005
+        && fare <= 15 + (8 * distance) + 0.005;
+    }
+
+    match /users/{userId} {
+      allow read: if (signedIn() && request.auth.uid == userId)
+        || (
+          userRole('passenger')
+          && exists(/databases/$(database)/documents/passenger_active/$(request.auth.uid))
+          && get(/databases/$(database)/documents/passenger_active/$(request.auth.uid)).data.rideId is string
+          && get(/databases/$(database)/documents/rides/$(get(/databases/$(database)/documents/passenger_active/$(request.auth.uid)).data.rideId)).data.passengerId == request.auth.uid
+          && get(/databases/$(database)/documents/rides/$(get(/databases/$(database)/documents/passenger_active/$(request.auth.uid)).data.rideId)).data.driverId == userId
+          && get(/databases/$(database)/documents/rides/$(get(/databases/$(database)/documents/passenger_active/$(request.auth.uid)).data.rideId)).data.status in ['accepted', 'in_progress']
+        )
+        || (userRole('admin') && resource.data.userType == 'driver');
+      allow create: if signedIn()
+        && request.auth.uid == userId
+        && request.resource.data.userType in ['passenger', 'driver']
+        && (
+          (
+            request.resource.data.userType == 'passenger'
+            && request.resource.data.isApproved == true
+          )
+          || (
+            request.resource.data.userType == 'driver'
+            && request.resource.data.isApproved == false
+            && request.resource.data.approvalStatus == 'pending'
+            && request.resource.data.franchiseNumber is string
+            && request.resource.data.franchiseNumber.size() > 0
+            && request.resource.data.franchiseNumber.size() <= 50
+            && request.resource.data.plateNumber is string
+            && request.resource.data.plateNumber.size() > 0
+            && request.resource.data.plateNumber.size() <= 20
+          )
+        );
+      allow update: if (
+          signedIn()
+          && request.auth.uid == userId
+          && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['name', 'phone', 'profileImage'])
+        )
+        || (
+          userRole('admin')
+          && resource.data.userType == 'driver'
+          && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly([
+              'isApproved',
+              'approvalStatus',
+              'approvalUpdatedAt',
+              'approvalUpdatedBy'
+            ])
+          && request.resource.data.isApproved is bool
+          && request.resource.data.approvalStatus in ['approved', 'rejected', 'revoked']
+          && request.resource.data.approvalUpdatedAt == request.time
+          && request.resource.data.approvalUpdatedBy == request.auth.uid
+          && noActiveDriverRide(userId)
+          && (
+            (
+              request.resource.data.isApproved == false
+              && request.resource.data.approvalStatus in ['rejected', 'revoked']
+            )
+            || (
+              request.resource.data.isApproved == true
+              && request.resource.data.approvalStatus == 'approved'
+              && resource.data.franchiseNumber is string
+              && resource.data.franchiseNumber.size() > 0
+              && resource.data.plateNumber is string
+              && resource.data.plateNumber.size() > 0
+            )
+          )
+        );
+      allow delete: if false;
+    }
+
+    match /public_profiles/{userId} {
+      allow read: if signedIn() && request.auth.uid == userId
+        || (
+          userRole('driver')
+          && exists(/databases/$(database)/documents/driver_presence/$(request.auth.uid))
+          && get(/databases/$(database)/documents/driver_presence/$(request.auth.uid)).data.activeRideId is string
+          && get(/databases/$(database)/documents/rides/$(get(/databases/$(database)/documents/driver_presence/$(request.auth.uid)).data.activeRideId)).data.passengerId == userId
+          && get(/databases/$(database)/documents/rides/$(get(/databases/$(database)/documents/driver_presence/$(request.auth.uid)).data.activeRideId)).data.driverId == request.auth.uid
+          && get(/databases/$(database)/documents/rides/$(get(/databases/$(database)/documents/driver_presence/$(request.auth.uid)).data.activeRideId)).data.status in ['accepted', 'in_progress']
+        );
+      allow create, update: if signedIn()
+        && request.auth.uid == userId
+        && request.resource.data.keys().hasOnly(['name'])
+        && request.resource.data.name is string
+        && request.resource.data.name.size() > 0
+        && request.resource.data.name.size() <= 100
+        && request.resource.data.name
+          == getAfter(/databases/$(database)/documents/users/$(userId)).data.name;
+      allow delete: if false;
+    }
+
+    match /security_events/{eventId} {
+      allow read: if userRole('admin')
+        || (signedIn() && resource.data.actorUid == request.auth.uid);
+      allow create: if userRole('driver')
+        && request.resource.data.keys().hasAll([
+          'actorUid',
+          'eventType',
+          'source',
+          'details',
+          'occurredAt'
+        ])
+        && request.resource.data.keys().hasOnly([
+          'actorUid',
+          'eventType',
+          'source',
+          'details',
+          'occurredAt'
+        ])
+        && request.resource.data.actorUid == request.auth.uid
+        && request.resource.data.eventType in [
+          'app_check_token_unavailable',
+          'mock_location_detected',
+          'gps_anomaly_detected',
+          'root_indicator_detected',
+          'emulator_indicator_detected',
+          'firestore_permission_denied'
+        ]
+        && request.resource.data.source == 'client'
+        && request.resource.data.details is string
+        && request.resource.data.details.size() <= 300
+        && request.resource.data.occurredAt == request.time;
+      allow update, delete: if false;
+    }
+
+    match /rides/{rideId} {
+      allow read: if isRideParticipant()
+        || (isApprovedDriver() && resource.data.status == 'requested')
+        || userRole('admin');
+      allow create: if userRole('passenger')
+        && request.resource.data.keys().hasAll([
+          'passengerId',
+          'driverId',
+          'pickupLocation',
+          'dropoffLocation',
+          'pickupLat',
+          'pickupLng',
+          'dropoffLat',
+          'dropoffLng',
+          'estimatedPrice',
+          'finalPrice',
+          'currency',
+          'fareBasis',
+          'distance',
+          'status',
+          'dispatchState',
+          'rideType',
+          'createdAt'
+        ])
+        && request.resource.data.keys().hasOnly([
+          'passengerId',
+          'driverId',
+          'pickupLocation',
+          'dropoffLocation',
+          'pickupLat',
+          'pickupLng',
+          'dropoffLat',
+          'dropoffLng',
+          'estimatedPrice',
+          'finalPrice',
+          'currency',
+          'fareBasis',
+          'distance',
+          'status',
+          'dispatchState',
+          'rideType',
+          'createdAt'
+        ])
+        && request.resource.data.passengerId == request.auth.uid
+        && request.resource.data.driverId == null
+        && request.resource.data.pickupLocation is string
+        && request.resource.data.pickupLocation.size() > 0
+        && request.resource.data.pickupLocation.size() <= 300
+        && request.resource.data.dropoffLocation is string
+        && request.resource.data.dropoffLocation.size() > 0
+        && request.resource.data.dropoffLocation.size() <= 300
+        && validRideCoordinates(request.resource.data)
+        && request.resource.data.distance is number
+        && request.resource.data.distance >= 0
+        && request.resource.data.distance <= 1000
+        && request.resource.data.estimatedPrice is number
+        && request.resource.data.estimatedPrice >= 15
+        && request.resource.data.estimatedPrice <= 10000
+        && validZoneFare(request.resource.data)
+        && request.resource.data.finalPrice == null
+        && request.resource.data.currency == 'PHP'
+        && request.resource.data.fareBasis == 'base15_flat_inside_1km_plus8_per_km_outside_v1'
+        && request.resource.data.status == 'requested'
+        && request.resource.data.dispatchState == 'queued'
+        && request.resource.data.rideType in ['economy', 'comfort', 'premium']
+        && request.resource.data.createdAt == request.time
+        && !exists(/databases/$(database)/documents/passenger_active/$(request.auth.uid))
+        && getAfter(/databases/$(database)/documents/passenger_active/$(request.auth.uid)).data.rideId == rideId;
+      allow update: if (
+          request.auth != null
+          && request.auth.uid == resource.data.passengerId
+          && resource.data.status == 'requested'
+          && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['status', 'dispatchState'])
+          && request.resource.data.status == 'cancelled'
+          && request.resource.data.dispatchState == 'cancelled'
+          && !existsAfter(/databases/$(database)/documents/passenger_active/$(request.auth.uid))
+        )
+        || (
+          request.auth != null
+          && request.auth.uid == resource.data.passengerId
+          && resource.data.status == 'accepted'
+          && resource.data.driverId is string
+          && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['status', 'dispatchState'])
+          && request.resource.data.status == 'cancelled'
+          && request.resource.data.dispatchState == 'cancelled'
+          && !existsAfter(/databases/$(database)/documents/passenger_active/$(request.auth.uid))
+        )
+        || (
+          isApprovedDriver()
+          && resource.data.status == 'requested'
+          && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['driverId', 'driverName', 'status', 'dispatchState'])
+          && request.resource.data.driverId == request.auth.uid
+          && request.resource.data.driverName is string
+          && request.resource.data.driverName.size() > 0
+          && request.resource.data.driverName.size() <= 100
+          && request.resource.data.driverName
+            == get(/databases/$(database)/documents/users/$(request.auth.uid)).data.name
+          && request.resource.data.status == 'accepted'
+          && request.resource.data.dispatchState == 'assigned'
+          && getAfter(/databases/$(database)/documents/driver_presence/$(request.auth.uid)).data.activeRideId == rideId
+        )
+        || (
+          isApprovedDriver()
+          && resource.data.driverId == request.auth.uid
+          && resource.data.status == 'accepted'
+          && request.resource.data.status == 'cancelled'
+          && request.resource.data.dispatchState == 'cancelled'
+          && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['status', 'dispatchState'])
+          && !existsAfter(/databases/$(database)/documents/passenger_active/$(resource.data.passengerId))
+        )
+        || (
+          request.auth != null
+          && request.auth.uid == resource.data.passengerId
+          && resource.data.status == 'accepted'
+          && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['tripVerificationCode', 'tripVerificationExpiresAt'])
+          && request.resource.data.tripVerificationCode is string
+          && request.resource.data.tripVerificationCode.size() == 64
+          && request.resource.data.tripVerificationExpiresAt is timestamp
+          && request.resource.data.tripVerificationExpiresAt > request.time
+          && request.resource.data.tripVerificationExpiresAt
+            <= request.time + duration.value(10, 'm')
+        )
+        || (
+          isApprovedDriver()
+          && resource.data.driverId == request.auth.uid
+          && resource.data.status == 'accepted'
+          && request.resource.data.status == 'in_progress'
+          && resource.data.tripVerificationCode is string
+          && resource.data.tripVerificationExpiresAt is timestamp
+          && resource.data.tripVerificationExpiresAt > request.time
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'status',
+            'startTime',
+            'qrValidatedAt',
+            'tripVerificationCode',
+            'tripVerificationExpiresAt'
+          ])
+          && request.resource.data.startTime == request.time
+          && request.resource.data.qrValidatedAt == request.time
+          && !('tripVerificationCode' in request.resource.data)
+          && !('tripVerificationExpiresAt' in request.resource.data)
+        )
+        || (
+          isApprovedDriver()
+          && resource.data.driverId == request.auth.uid
+          && resource.data.status in ['accepted', 'in_progress']
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'driverLocation',
+            'driverLocationAccuracyMeters',
+            'driverLocationUpdatedAt'
+          ])
+          && request.resource.data.driverLocation is latlng
+          && request.resource.data.driverLocationAccuracyMeters is number
+          && request.resource.data.driverLocationAccuracyMeters >= 0
+          && request.resource.data.driverLocationAccuracyMeters <= 1000
+          && request.resource.data.driverLocationUpdatedAt == request.time
+        )
+        || (
+          isApprovedDriver()
+          && resource.data.driverId == request.auth.uid
+          && resource.data.status == 'in_progress'
+          && request.resource.data.status == 'completed'
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'status',
+            'endTime',
+            'finalPrice',
+            'currency',
+            'fareBasis',
+            'paymentMethod',
+            'cashCollectedByDriver'
+          ])
+          && request.resource.data.endTime == request.time
+          && request.resource.data.finalPrice == resource.data.estimatedPrice
+          && request.resource.data.currency == 'PHP'
+          && request.resource.data.fareBasis == resource.data.fareBasis
+          && resource.data.fareBasis in [
+            'base_plus_distance',
+            'base15_flat_inside_1km_plus8_per_km_outside_v1'
+          ]
+          && request.resource.data.paymentMethod == 'cash'
+          && request.resource.data.cashCollectedByDriver == true
+          && !existsAfter(/databases/$(database)/documents/passenger_active/$(resource.data.passengerId))
+          && getAfter(/databases/$(database)/documents/wallet_ledger/$(rideId)).data.driverId == request.auth.uid
+        )
+        || (
+          isRideParticipant()
+          && (
+            (request.auth.uid == resource.data.passengerId
+              && request.resource.data.diff(resource.data).affectedKeys()
+                .hasOnly(['passengerRating', 'passengerReview']))
+            || (request.auth.uid == resource.data.driverId
+              && request.resource.data.diff(resource.data).affectedKeys()
+                .hasOnly(['driverRating', 'driverReview']))
+          )
+        );
+      allow delete: if false;
+    }
+
+    match /driver_presence/{driverId} {
+      allow read: if (signedIn() && request.auth.uid == driverId)
+        || (
+          userRole('passenger')
+          && resource.data.activeRideId is string
+          && get(/databases/$(database)/documents/rides/$(resource.data.activeRideId)).data.passengerId == request.auth.uid
+          && get(/databases/$(database)/documents/rides/$(resource.data.activeRideId)).data.driverId == driverId
+          && get(/databases/$(database)/documents/rides/$(resource.data.activeRideId)).data.status == 'accepted'
+        )
+        || userRole('admin');
+      allow create: if signedIn()
+        && request.auth.uid == driverId
+        && (
+          (
+            isApprovedDriver()
+            &&
+            request.resource.data.keys().hasAll([
+              'isOnline',
+              'location',
+              'locationAccuracyMeters',
+              'updatedAt',
+              'activeRideId'
+            ])
+            && request.resource.data.keys().hasOnly([
+              'isOnline',
+              'location',
+              'locationAccuracyMeters',
+              'updatedAt',
+              'activeRideId'
+            ])
+            && request.resource.data.isOnline == true
+            && request.resource.data.activeRideId == null
+            && validDriverPresenceLocation(request.resource.data)
+          )
+          || (
+            userRole('driver')
+            &&
+            request.resource.data.keys().hasOnly(['isOnline', 'updatedAt'])
+            && request.resource.data.isOnline == false
+            && request.resource.data.updatedAt == request.time
+          )
+        );
+      allow update: if signedIn()
+        && request.auth.uid == driverId
+        && (
+          (
+            isApprovedDriver()
+            &&
+            request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+              'isOnline',
+              'location',
+              'locationAccuracyMeters',
+              'updatedAt',
+              'activeRideId'
+            ])
+            && (
+              !('activeRideId' in resource.data)
+              || resource.data.activeRideId == null
+            )
+            && request.resource.data.isOnline == true
+            && request.resource.data.activeRideId == null
+            && validDriverPresenceLocation(request.resource.data)
+          )
+          || (
+            isApprovedDriver()
+            &&
+            request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+              'isOnline',
+              'activeRideId',
+              'updatedAt'
+            ])
+            && request.resource.data.isOnline == false
+            && request.resource.data.activeRideId is string
+            && request.resource.data.updatedAt == request.time
+            && getAfter(/databases/$(database)/documents/rides/$(request.resource.data.activeRideId)).data.driverId == driverId
+            && getAfter(/databases/$(database)/documents/rides/$(request.resource.data.activeRideId)).data.status == 'accepted'
+          )
+          || (
+            isApprovedDriver()
+            &&
+            request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+              'isOnline',
+              'activeRideId',
+              'updatedAt'
+            ])
+            && resource.data.activeRideId is string
+            && request.resource.data.isOnline == false
+            && request.resource.data.activeRideId == null
+            && request.resource.data.updatedAt == request.time
+            && getAfter(/databases/$(database)/documents/rides/$(resource.data.activeRideId)).data.driverId == driverId
+            && getAfter(/databases/$(database)/documents/rides/$(resource.data.activeRideId)).data.status in ['completed', 'cancelled']
+          )
+          || (
+            userRole('driver')
+            &&
+            request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+              'isOnline',
+              'updatedAt'
+            ])
+            && request.resource.data.isOnline == false
+            && request.resource.data.updatedAt == request.time
+          )
+        )
+        || (
+          userRole('admin')
+          && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['isOnline', 'updatedAt'])
+          && request.resource.data.isOnline == false
+          && request.resource.data.updatedAt == request.time
+          && noActiveDriverRide(driverId)
+        )
+        || (
+          signedIn()
+          && userRole('passenger')
+          && resource.data.activeRideId is string
+          && resource.data.isOnline == false
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'isOnline',
+            'activeRideId',
+            'updatedAt'
+          ])
+          && request.resource.data.isOnline == false
+          && request.resource.data.activeRideId == null
+          && request.resource.data.updatedAt == request.time
+          && get(/databases/$(database)/documents/rides/$(resource.data.activeRideId)).data.passengerId == request.auth.uid
+          && get(/databases/$(database)/documents/rides/$(resource.data.activeRideId)).data.driverId == driverId
+          && get(/databases/$(database)/documents/rides/$(resource.data.activeRideId)).data.status == 'accepted'
+          && getAfter(/databases/$(database)/documents/rides/$(resource.data.activeRideId)).data.status == 'cancelled'
+        );
+      allow delete: if false;
+    }
+
+    match /passenger_active/{passengerId} {
+      allow read: if (signedIn() && request.auth.uid == passengerId)
+        || (
+          isApprovedDriver()
+          && resource.data.rideId is string
+          && (
+            get(/databases/$(database)/documents/rides/$(resource.data.rideId)).data.status == 'requested'
+            || (
+              get(/databases/$(database)/documents/rides/$(resource.data.rideId)).data.driverId == request.auth.uid
+              && get(/databases/$(database)/documents/rides/$(resource.data.rideId)).data.status in ['accepted', 'in_progress']
+            )
+          )
+        );
+      allow create: if signedIn()
+        && request.auth.uid == passengerId
+        && userRole('passenger')
+        && request.resource.data.keys().hasOnly(['rideId'])
+        && request.resource.data.rideId is string
+        && getAfter(/databases/$(database)/documents/rides/$(request.resource.data.rideId)).data.passengerId == passengerId
+        && getAfter(/databases/$(database)/documents/rides/$(request.resource.data.rideId)).data.status == 'requested';
+      allow delete: if signedIn()
+        && resource.data.rideId is string
+        && (
+          (
+            request.auth.uid == passengerId
+            && (
+              !existsAfter(/databases/$(database)/documents/rides/$(resource.data.rideId))
+              || getAfter(/databases/$(database)/documents/rides/$(resource.data.rideId)).data.status in ['cancelled', 'completed']
+            )
+          )
+          || (
+            isApprovedDriver()
+            && getAfter(/databases/$(database)/documents/rides/$(resource.data.rideId)).data.passengerId == passengerId
+            && getAfter(/databases/$(database)/documents/rides/$(resource.data.rideId)).data.driverId == request.auth.uid
+            && getAfter(/databases/$(database)/documents/rides/$(resource.data.rideId)).data.status == 'completed'
+          )
+          || (
+            isApprovedDriver()
+            && getAfter(/databases/$(database)/documents/rides/$(resource.data.rideId)).data.passengerId == passengerId
+            && getAfter(/databases/$(database)/documents/rides/$(resource.data.rideId)).data.driverId == request.auth.uid
+            && getAfter(/databases/$(database)/documents/rides/$(resource.data.rideId)).data.status == 'cancelled'
+          )
+        );
+      allow update: if false;
+    }
+
+    match /wallets/{userId} {
+      allow read: if signedIn() && request.auth.uid == userId;
+      allow write: if false;
+    }
+
+    match /wallet_ledger/{entryId} {
+      allow read: if signedIn()
+        && (resource.data.driverId == request.auth.uid
+          || resource.data.passengerId == request.auth.uid
+          || userRole('admin'));
+      allow create: if isApprovedDriver()
+        && entryId is string
+        && request.resource.data.keys().hasOnly([
+          'rideId',
+          'passengerId',
+          'driverId',
+          'currency',
+          'farePhp',
+          'baseFarePhp',
+          'distanceKm',
+          'ratePerKmPhp',
+          'driverFareAllocationPhp',
+          'cooperativeFeePhp',
+          'driverCreditPhp',
+          'cashFarePhp',
+          'platformCreditPhp',
+          'fareBasis',
+          'fareCalculationVersion',
+          'entryType',
+          'paymentMethod',
+          'cashCollectedByDriver',
+          'settlementStatus',
+          'createdAt'
+        ])
+        && request.resource.data.rideId == entryId
+        && request.resource.data.driverId == request.auth.uid
+        && request.resource.data.passengerId is string
+        && request.resource.data.currency == 'PHP'
+        && request.resource.data.farePhp is number
+        && request.resource.data.farePhp >= 15
+        && request.resource.data.farePhp <= 10000
+        && request.resource.data.baseFarePhp == 15
+        && request.resource.data.distanceKm is number
+        && request.resource.data.distanceKm >= 0
+        && request.resource.data.distanceKm <= 1000
+        && request.resource.data.ratePerKmPhp == 8
+        && request.resource.data.driverFareAllocationPhp
+          == request.resource.data.farePhp
+        && request.resource.data.cooperativeFeePhp == 0
+        && request.resource.data.driverCreditPhp == 0
+        && request.resource.data.cashFarePhp == request.resource.data.farePhp
+        && request.resource.data.platformCreditPhp == 0
+        && (
+          (
+            request.resource.data.fareBasis
+              == 'base15_flat_inside_1km_plus8_per_km_outside_v1'
+            && request.resource.data.fareCalculationVersion
+              == 'php_base15_flat_inside_1km_plus8_route_km_outside_v2'
+            && getAfter(/databases/$(database)/documents/rides/$(entryId)).data.fareBasis
+              == 'base15_flat_inside_1km_plus8_per_km_outside_v1'
+            && validZoneFare(
+              getAfter(/databases/$(database)/documents/rides/$(entryId)).data
+            )
+          )
+          || (
+            request.resource.data.fareBasis == 'base_plus_distance'
+            && request.resource.data.fareCalculationVersion
+              == 'php_base15_per_km8_v1'
+            && getAfter(/databases/$(database)/documents/rides/$(entryId)).data.fareBasis
+              == 'base_plus_distance'
+            && validLegacyFare(
+              request.resource.data.farePhp,
+              request.resource.data.distanceKm
+            )
+          )
+        )
+        && request.resource.data.entryType == 'cash_fare_record'
+        && request.resource.data.paymentMethod == 'cash'
+        && request.resource.data.cashCollectedByDriver == true
+        && request.resource.data.settlementStatus == 'cash_recorded'
+        && request.resource.data.createdAt == request.time
+        && getAfter(/databases/$(database)/documents/rides/$(entryId)).data.status == 'completed'
+        && getAfter(/databases/$(database)/documents/rides/$(entryId)).data.driverId == request.auth.uid
+        && getAfter(/databases/$(database)/documents/rides/$(entryId)).data.passengerId == request.resource.data.passengerId
+        && getAfter(/databases/$(database)/documents/rides/$(entryId)).data.estimatedPrice == request.resource.data.farePhp
+        && getAfter(/databases/$(database)/documents/rides/$(entryId)).data.distance == request.resource.data.distanceKm
+        && getAfter(/databases/$(database)/documents/rides/$(entryId)).data.finalPrice == request.resource.data.farePhp
+        && getAfter(/databases/$(database)/documents/rides/$(entryId)).data.cashCollectedByDriver == true;
+      allow update, delete: if false;
+    }
+
+    match /device_tokens/{tokenId} {
+      allow read, write: if false;
+    }
+  }
+}

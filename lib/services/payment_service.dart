@@ -1,0 +1,91 @@
+import 'location_service.dart';
+
+class PaymentService {
+  static const double baseFarePhp = 15;
+  static const double perKilometerPhp = 8;
+  static const double flatFareRadiusKm = 1;
+  static const String flatFareBasis =
+      'base15_flat_inside_1km_plus8_per_km_outside_v1';
+  static const String flatFareCalculationVersion =
+      'php_base15_flat_inside_1km_plus8_route_km_outside_v2';
+  static const String legacyFareBasis = 'base_plus_distance';
+  static const String legacyFareCalculationVersion = 'php_base15_per_km8_v1';
+
+  bool isWithinFlatFareZone({
+    required double pickupLatitude,
+    required double pickupLongitude,
+    required double dropoffLatitude,
+    required double dropoffLongitude,
+  }) {
+    double approximateDistanceKm(double latitude, double longitude) {
+      final northSouthKm =
+          (latitude - LocationService.serviceAreaCenterLatitude) * 110.62;
+      final eastWestKm =
+          (longitude - LocationService.serviceAreaCenterLongitude) * 110.29;
+      return northSouthKm * northSouthKm + eastWestKm * eastWestKm;
+    }
+
+    final radiusSquared = flatFareRadiusKm * flatFareRadiusKm;
+    return approximateDistanceKm(pickupLatitude, pickupLongitude) <=
+            radiusSquared &&
+        approximateDistanceKm(dropoffLatitude, dropoffLongitude) <=
+            radiusSquared;
+  }
+
+  double calculateRidePrice(
+    double distanceKm, {
+    required double pickupLatitude,
+    required double pickupLongitude,
+    required double dropoffLatitude,
+    required double dropoffLongitude,
+  }) {
+    if (!distanceKm.isFinite || distanceKm < 0) {
+      throw ArgumentError.value(distanceKm, 'distanceKm');
+    }
+    final fare =
+        isWithinFlatFareZone(
+          pickupLatitude: pickupLatitude,
+          pickupLongitude: pickupLongitude,
+          dropoffLatitude: dropoffLatitude,
+          dropoffLongitude: dropoffLongitude,
+        )
+        ? baseFarePhp
+        : baseFarePhp + perKilometerPhp * distanceKm;
+    return fare.roundToDouble();
+  }
+
+  // Calculate estimated time (in minutes)
+  double calculateEstimatedTime(double distanceKm) {
+    // Average speed: 30 km/h in city
+    const double averageSpeed = 30;
+    return (distanceKm / averageSpeed) * 60;
+  }
+
+  // Format price for display
+  String formatPrice(double price) {
+    return '₱${price.round()}';
+  }
+
+  // Get ride type details
+  Map<String, dynamic> getRideTypeDetails(String rideType) {
+    const Map<String, Map<String, dynamic>> rideTypes = {
+      'economy': {
+        'name': 'Economy',
+        'description': 'Affordable and reliable',
+        'seats': 4,
+      },
+      'comfort': {
+        'name': 'Comfort',
+        'description': 'More space and comfort',
+        'seats': 4,
+      },
+      'premium': {
+        'name': 'Premium',
+        'description': 'Luxury and premium service',
+        'seats': 4,
+      },
+    };
+
+    return rideTypes[rideType] ?? rideTypes['economy']!;
+  }
+}
