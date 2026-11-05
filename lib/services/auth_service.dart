@@ -4,6 +4,7 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/foundation.dart';
 
 import '../models/user_model.dart';
+import 'passenger_id_service.dart';
 
 class AuthService {
   AuthService() {
@@ -31,6 +32,7 @@ class AuthService {
     String userType, {
     String? franchiseNumber,
     String? plateNumber,
+    PassengerIdUpload? idUpload,
   }) async {
     if (!RegExp(r'^\d{11}$').hasMatch(phone)) {
       throw const FormatException(
@@ -38,6 +40,7 @@ class AuthService {
       );
     }
     if (!isAvailable) return null;
+    final passengerIdUpload = userType == 'passenger' ? idUpload : null;
 
     try {
       UserCredential result = await _firebaseAuth!
@@ -58,11 +61,25 @@ class AuthService {
             plateNumber: plateNumber,
             isApproved: userType != 'driver',
             approvalStatus: userType == 'driver' ? 'pending' : null,
+            idVerificationStatus: passengerIdUpload != null ? 'pending' : null,
+            idType: passengerIdUpload?.idType,
           );
+          final userData = userModel.toFirestore();
           final batch = _firestore!.batch();
+          if (passengerIdUpload != null) {
+            userData.addAll(
+              PassengerIdService.pendingProfileFields(passengerIdUpload),
+            );
+            // Written in the same batch so the account is never created
+            // without its ID (or vice versa).
+            batch.set(
+              PassengerIdService.collection(_firestore!).doc(user.uid),
+              PassengerIdService.documentData(passengerIdUpload),
+            );
+          }
           batch.set(
             _firestore!.collection('users').doc(user.uid),
-            userModel.toFirestore(),
+            userData,
           );
           batch.set(_firestore!.collection('public_profiles').doc(user.uid), {
             'name': name,
@@ -111,6 +128,13 @@ class AuthService {
       debugPrint('Signin Error: $e');
     }
     return null;
+  }
+
+  Future<void> sendPasswordResetEmail(String email) async {
+    if (!isAvailable) {
+      throw StateError('Account recovery is currently unavailable.');
+    }
+    await _firebaseAuth!.sendPasswordResetEmail(email: email.trim());
   }
 
   Future<void> signout() async {

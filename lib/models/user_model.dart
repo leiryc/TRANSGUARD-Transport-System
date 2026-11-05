@@ -15,6 +15,13 @@ class UserModel {
   final String? approvalStatus;
   final String? franchiseNumber;
   final String? plateNumber;
+  // Passenger ID verification: null (not submitted), 'pending', 'verified',
+  // or 'rejected'. Informational only; it does not block booking rides.
+  final String? idVerificationStatus;
+  final String? idType;
+  final String? idRejectionReason;
+  final DateTime? idSubmittedAt;
+  final DateTime? idReviewedAt;
   final bool isFromCache;
 
   UserModel({
@@ -32,8 +39,22 @@ class UserModel {
     this.approvalStatus,
     this.franchiseNumber,
     this.plateNumber,
+    this.idVerificationStatus,
+    this.idType,
+    this.idRejectionReason,
+    this.idSubmittedAt,
+    this.idReviewedAt,
     this.isFromCache = false,
   });
+
+  bool get isIdVerified => idVerificationStatus == 'verified';
+
+  /// A passenger's name can't change while their ID is under review or once
+  /// it is verified, so the verified badge always matches the name on the ID.
+  /// Mirrored in firestore.rules.
+  bool get isNameLocked =>
+      userType == 'passenger' &&
+      (idVerificationStatus == 'pending' || idVerificationStatus == 'verified');
 
   factory UserModel.fromFirestore(DocumentSnapshot doc) {
     final data = doc.data() as Map<String, dynamic>;
@@ -53,6 +74,15 @@ class UserModel {
       approvalStatus: data['approvalStatus'],
       franchiseNumber: data['franchiseNumber'],
       plateNumber: data['plateNumber'],
+      idVerificationStatus: data['idVerificationStatus'],
+      idType: data['idType'],
+      idRejectionReason: data['idRejectionReason'],
+      idSubmittedAt: data['idSubmittedAt'] is Timestamp
+          ? (data['idSubmittedAt'] as Timestamp).toDate()
+          : null,
+      idReviewedAt: data['idReviewedAt'] is Timestamp
+          ? (data['idReviewedAt'] as Timestamp).toDate()
+          : null,
       isFromCache: doc.metadata.isFromCache,
     );
   }

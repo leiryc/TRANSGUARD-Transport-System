@@ -14,6 +14,7 @@ import '../../services/payment_service.dart';
 import '../../services/road_routing_service.dart';
 import '../../services/ride_service.dart';
 import '../../models/ride_model.dart';
+import '../../widgets/ride_contact_actions.dart';
 
 class RideTrackingScreen extends StatefulWidget {
   final String rideId;
@@ -1028,54 +1029,72 @@ class _RideTrackingScreenState extends State<RideTrackingScreen> {
           ),
         ],
       ),
-      child: StreamBuilder<UserModel?>(
-        stream: driverProfileStream,
-        builder: (context, snapshot) {
-          final profileName = snapshot.data?.name.trim();
-          final displayName = driverName?.isNotEmpty == true
-              ? driverName!
-              : profileName?.isNotEmpty == true
-              ? profileName!
-              : 'Driver assigned';
-          return Row(
-            children: [
-              Container(
-                width: 48,
-                height: 48,
-                decoration: BoxDecoration(
-                  color: _brandGreen.withValues(alpha: 0.12),
-                  borderRadius: BorderRadius.circular(16),
-                ),
-                child: const Icon(
-                  Icons.person_rounded,
-                  color: _brandGreen,
-                  size: 26,
-                ),
-              ),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text(
-                      'Your driver',
-                      style: TextStyle(fontSize: 12, color: Colors.black54),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          StreamBuilder<UserModel?>(
+            stream: driverProfileStream,
+            builder: (context, snapshot) {
+              final profileName = snapshot.data?.name.trim();
+              final displayName = driverName?.isNotEmpty == true
+                  ? driverName!
+                  : profileName?.isNotEmpty == true
+                  ? profileName!
+                  : 'Driver assigned';
+              return Row(
+                children: [
+                  Container(
+                    width: 48,
+                    height: 48,
+                    decoration: BoxDecoration(
+                      color: _brandGreen.withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(16),
                     ),
-                    const SizedBox(height: 3),
-                    Text(
-                      displayName,
-                      style: const TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w800,
-                        color: _brandDark,
-                      ),
+                    child: const Icon(
+                      Icons.person_rounded,
+                      color: _brandGreen,
+                      size: 26,
                     ),
-                  ],
-                ),
-              ),
-            ],
-          );
-        },
+                  ),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'Your driver',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Colors.black54,
+                          ),
+                        ),
+                        const SizedBox(height: 3),
+                        Text(
+                          displayName,
+                          style: const TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w800,
+                            color: _brandDark,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              );
+            },
+          ),
+          // Chat and call are available while the driver is on the way.
+          if (ride.status == 'accepted') ...[
+            const SizedBox(height: 16),
+            RideContactActions(
+              key: ValueKey('contact_${ride.id}'),
+              ride: ride,
+              viewerRole: 'passenger',
+              otherPartyName: driverName,
+            ),
+          ],
+        ],
       ),
     );
   }

@@ -1,10 +1,13 @@
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../services/auth_service.dart';
+import '../../services/passenger_id_service.dart';
 import '../../models/user_model.dart';
+import '../../widgets/id_upload_field.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -22,7 +25,11 @@ class _LoginScreenState extends State<LoginScreen> {
   final _plateController = TextEditingController();
 
   String _selectedUserType = 'passenger';
+  String? _idType;
+  IdImage? _idImage;
+  String? _idImageError;
   bool _isLoading = false;
+  bool _isSendingPasswordReset = false;
   bool _isLogin = true;
   bool _obscurePassword = true;
   bool _staySignedIn = true;
@@ -70,6 +77,9 @@ class _LoginScreenState extends State<LoginScreen> {
       _phoneController.clear();
       _franchiseController.clear();
       _plateController.clear();
+      _idType = null;
+      _idImage = null;
+      _idImageError = null;
     });
   }
 
@@ -126,7 +136,15 @@ class _LoginScreenState extends State<LoginScreen> {
   Future<void> _handleAuth() async {
     FocusScope.of(context).unfocus();
 
-    if (!(_formKey.currentState?.validate() ?? false)) return;
+    final formValid = _formKey.currentState?.validate() ?? false;
+    final needsId = !_isLogin && _selectedUserType == 'passenger';
+    final idMissing = needsId && _idImage == null;
+    setState(
+      () => _idImageError = idMissing
+          ? 'Upload a photo of your valid ID'
+          : null,
+    );
+    if (!formValid || idMissing) return;
 
     setState(() => _isLoading = true);
 
@@ -154,6 +172,9 @@ class _LoginScreenState extends State<LoginScreen> {
           plateNumber: _selectedUserType == 'driver'
               ? _plateController.text.trim()
               : null,
+          idUpload: _selectedUserType == 'passenger'
+              ? PassengerIdUpload(idType: _idType!, image: _idImage!)
+              : null,
         );
       }
 
@@ -178,6 +199,54 @@ class _LoginScreenState extends State<LoginScreen> {
       if (mounted) {
         setState(() => _isLoading = false);
       }
+    }
+  }
+
+  Future<void> _sendPasswordReset() async {
+    FocusScope.of(context).unfocus();
+    final email = _emailController.text.trim();
+    final emailError = _validateEmail(email);
+    if (emailError != null) {
+      _showSnackBar(emailError);
+      return;
+    }
+
+    setState(() => _isSendingPasswordReset = true);
+    try {
+      await Provider.of<AuthService>(
+        context,
+        listen: false,
+      ).sendPasswordResetEmail(email);
+      if (mounted) {
+        _showSnackBar(
+          'If an account exists for this email, password reset instructions '
+          'will be sent.',
+        );
+      }
+    } on FirebaseAuthException catch (error) {
+      if (!mounted) return;
+      final message = switch (error.code) {
+        'user-not-found' =>
+          'If an account exists for this email, password reset instructions '
+              'will be sent.',
+        'invalid-email' => 'Enter a valid email address.',
+        'too-many-requests' => 'Too many attempts. Please wait and try again.',
+        'network-request-failed' =>
+          'Check your internet connection and try again.',
+        'operation-not-allowed' =>
+          'Password recovery is not enabled for this sign-in method.',
+        _ => 'Could not send password reset instructions. Please try again.',
+      };
+      _showSnackBar(message);
+    } catch (error) {
+      debugPrint('Password reset request failed: $error');
+      if (mounted) {
+        _showSnackBar(
+          'Could not send password reset instructions. Please try again.',
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isSendingPasswordReset = false);
     }
   }
 
@@ -308,6 +377,23 @@ class _LoginScreenState extends State<LoginScreen> {
             const SizedBox(height: 16),
             _buildPasswordField(),
             if (_isLogin) ...[
+              Align(
+                alignment: Alignment.centerRight,
+                child: TextButton(
+                  onPressed: _isLoading || _isSendingPasswordReset
+                      ? null
+                      : _sendPasswordReset,
+                  child: _isSendingPasswordReset
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Text('Forgot password?'),
+                ),
+              ),
+            ],
+            if (_isLogin) ...[
               const SizedBox(height: 12),
               _buildStaySignedInToggle(colors),
             ],
@@ -339,6 +425,20 @@ class _LoginScreenState extends State<LoginScreen> {
               if (_selectedUserType == 'driver') ...[
                 const SizedBox(height: 16),
                 _buildDriverAccreditationFields(colors),
+              ],
+              if (_selectedUserType == 'passenger') ...[
+                const SizedBox(height: 16),
+                IdUploadField(
+                  idType: _idType,
+                  image: _idImage,
+                  enabled: !_isLoading,
+                  errorText: _idImageError,
+                  onIdTypeChanged: (value) => setState(() => _idType = value),
+                  onImageChanged: (value) => setState(() {
+                    _idImage = value;
+                    if (value != null) _idImageError = null;
+                  }),
+                ),
               ],
             ],
             const SizedBox(height: 24),

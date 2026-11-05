@@ -19,6 +19,9 @@ const MAX_START_DISTANCE_FROM_PICKUP_KM = 0.5;
 const TRIP_QR_TTL_MS = 5 * 60 * 1000;
 const BASE_FARE_PHP = 15;
 const FARE_PER_KILOMETER_PHP = 8;
+const COOPERATIVE_SHARE_PERCENT = 30;
+const COOPERATIVE_SHARE_RATE = COOPERATIVE_SHARE_PERCENT / 100;
+const FARE_ALLOCATION_POLICY_VERSION = "cooperative_30_driver_70_v1";
 const MAX_REPORT_RIDES = 5000;
 const callableOptions = { enforceAppCheck: true };
 const PICKUP_SERVICE_AREA_CENTER: Coordinates = {
@@ -607,14 +610,22 @@ export const finishRide = onCall(callableOptions, async (request) => {
     }
     passengerIdForNotification = passengerId;
     const estimatedFare = ride.get("estimatedPrice");
+    const distanceKm = ride.get("distance");
     if (
       typeof estimatedFare !== "number" ||
       !Number.isFinite(estimatedFare) ||
-      estimatedFare < BASE_FARE_PHP
+      estimatedFare < BASE_FARE_PHP ||
+      estimatedFare > 10000 ||
+      typeof distanceKm !== "number" ||
+      !Number.isFinite(distanceKm) ||
+      distanceKm < 0 ||
+      distanceKm > 1000
     ) {
       throw new HttpsError("failed-precondition", "Ride fare is invalid.");
     }
     finalFare = estimatedFare;
+    const cooperativeFee = finalFare * COOPERATIVE_SHARE_RATE;
+    const driverAllocation = finalFare - cooperativeFee;
     const activeRideRef = db.collection("passenger_active").doc(passengerId);
     const activeRide = await transaction.get(activeRideRef);
     const ledgerEntry = await transaction.get(ledgerRef);
@@ -636,10 +647,18 @@ export const finishRide = onCall(callableOptions, async (request) => {
       driverId: request.auth!.uid,
       currency: "PHP",
       farePhp: finalFare,
+      baseFarePhp: BASE_FARE_PHP,
+      distanceKm,
+      ratePerKmPhp: FARE_PER_KILOMETER_PHP,
+      driverFareAllocationPhp: driverAllocation,
+      cooperativeFeePhp: cooperativeFee,
+      cooperativeSharePercent: COOPERATIVE_SHARE_PERCENT,
+      allocationPolicyVersion: FARE_ALLOCATION_POLICY_VERSION,
       driverCreditPhp: 0,
       cashFarePhp: finalFare,
       platformCreditPhp: 0,
       fareBasis: "base_plus_distance",
+      fareCalculationVersion: "php_base15_per_km8_v1",
       entryType: "cash_fare_record",
       paymentMethod: "cash",
       cashCollectedByDriver: true,

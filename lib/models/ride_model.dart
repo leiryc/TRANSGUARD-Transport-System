@@ -32,6 +32,9 @@ class RideModel {
   final DateTime? qrValidatedAt;
   final String? paymentMethod;
   final bool cashCollectedByDriver;
+  // Snapshot of the passenger's ID verification when the ride was requested.
+  // Firestore rules only accept true if the passenger's ID is verified.
+  final bool passengerIdVerified;
   final bool isFromCache;
 
   RideModel({
@@ -65,6 +68,7 @@ class RideModel {
     this.qrValidatedAt,
     this.paymentMethod,
     this.cashCollectedByDriver = false,
+    this.passengerIdVerified = false,
     this.isFromCache = false,
   });
 
@@ -113,6 +117,7 @@ class RideModel {
           : null,
       paymentMethod: data['paymentMethod'] as String?,
       cashCollectedByDriver: data['cashCollectedByDriver'] == true,
+      passengerIdVerified: data['passengerIdVerified'] == true,
       isFromCache: doc.metadata.isFromCache,
     );
   }
@@ -147,6 +152,7 @@ class RideModel {
           : null,
       'paymentMethod': paymentMethod,
       'cashCollectedByDriver': cashCollectedByDriver,
+      'passengerIdVerified': passengerIdVerified,
     };
   }
 }

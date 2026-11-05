@@ -14,6 +14,8 @@ import '../../services/payment_service.dart';
 import '../../services/road_routing_service.dart';
 import '../../services/ride_service.dart';
 import '../../services/security_audit_service.dart';
+import '../../widgets/ride_contact_actions.dart';
+import '../../widgets/verified_passenger_badge.dart';
 
 class DriverTrackingScreen extends StatefulWidget {
   final String rideId;
@@ -501,6 +503,16 @@ class _DriverTrackingScreenState extends State<DriverTrackingScreen> {
       if (nextStatus == 'completed') {
         await _stopSharing();
       }
+    } on FirebaseException catch (error) {
+      if (!mounted) return;
+      final message = error.code == 'permission-denied'
+          ? 'Could not record the cash fare: Firestore denied the update. '
+                'Deploy the latest Firestore rules and try again.'
+          : 'Could not update the ride (${error.code}). Please try again.';
+      _showSnackBar(message, isError: true);
+    } catch (error) {
+      if (!mounted) return;
+      _showSnackBar('Could not update the ride: $error', isError: true);
     } finally {
       if (mounted) setState(() => _isUpdatingStatus = false);
     }
@@ -1078,6 +1090,15 @@ class _DriverTrackingScreenState extends State<DriverTrackingScreen> {
             _buildPassengerName(ride),
             const SizedBox(height: 12),
           ],
+          // Chat is available while heading to the pickup.
+          if (ride.status == 'accepted') ...[
+            RideContactActions(
+              key: ValueKey('contact_${ride.id}'),
+              ride: ride,
+              viewerRole: 'driver',
+            ),
+            const SizedBox(height: 14),
+          ],
           _buildLocationLine(
             icon: Icons.trip_origin,
             color: _brandGreen,
@@ -1139,7 +1160,7 @@ class _DriverTrackingScreenState extends State<DriverTrackingScreen> {
       stream: _passengerNameStream,
       builder: (context, snapshot) {
         final passengerName = snapshot.data;
-        return _buildLocationLine(
+        final nameLine = _buildLocationLine(
           icon: Icons.person_outline_rounded,
           color: _brandGreen,
           label: 'Passenger',
@@ -1148,6 +1169,14 @@ class _DriverTrackingScreenState extends State<DriverTrackingScreen> {
               (snapshot.hasError
                   ? 'Name unavailable'
                   : 'Loading passenger name…'),
+        );
+        if (!ride.passengerIdVerified) return nameLine;
+        return Row(
+          children: [
+            Expanded(child: nameLine),
+            const SizedBox(width: 8),
+            const VerifiedPassengerBadge(),
+          ],
         );
       },
     );

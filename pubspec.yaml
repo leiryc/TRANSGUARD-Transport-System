@@ -58,6 +58,8 @@ dependencies:
   intl: ^0.20.3
   qr_flutter: ^4.1.0
   mobile_scanner: ^7.4.2
+  image_picker: ^1.1.2
+  url_launcher: ^6.3.1
   
   # Real-time
   web_socket_channel: ^3.0.3

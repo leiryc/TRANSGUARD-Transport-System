@@ -62,6 +62,7 @@ class RideService {
         'dispatchState': 'queued',
         'rideType': ride.rideType,
         'createdAt': FieldValue.serverTimestamp(),
+        'passengerIdVerified': ride.passengerIdVerified,
       });
       transaction.set(activeRideRef, {'rideId': rideRef.id});
     });
@@ -492,6 +493,10 @@ class RideService {
             .collection('passenger_active')
             .doc(passengerId);
         final activeRide = await transaction.get(activeRideRef);
+        final cooperativeFee = PaymentService().calculateCooperativeShare(
+          fare.toDouble(),
+        );
+        final driverAllocation = fare.toDouble() - cooperativeFee;
         transaction.update(rideRef, {
           'status': 'completed',
           'endTime': FieldValue.serverTimestamp(),
@@ -510,8 +515,10 @@ class RideService {
           'baseFarePhp': 15,
           'distanceKm': distanceKm,
           'ratePerKmPhp': 8,
-          'driverFareAllocationPhp': fare,
-          'cooperativeFeePhp': 0,
+          'driverFareAllocationPhp': driverAllocation,
+          'cooperativeFeePhp': cooperativeFee,
+          'cooperativeSharePercent': PaymentService.cooperativeSharePercent,
+          'allocationPolicyVersion': PaymentService.fareAllocationPolicyVersion,
           'driverCreditPhp': 0,
           'cashFarePhp': fare,
           'platformCreditPhp': 0,
@@ -538,9 +545,9 @@ class RideService {
         }
       });
       return true;
-    } catch (e) {
-      debugPrint('Complete Ride Error: $e');
-      return false;
+    } catch (error, stackTrace) {
+      debugPrint('Complete Ride Error: $error');
+      Error.throwWithStackTrace(error, stackTrace);
     }
   }
 
@@ -609,6 +616,8 @@ class RideService {
           'cooperativeFeePhp': cooperativeShare is num
               ? cooperativeShare.toDouble()
               : 0.0,
+          'cooperativeSharePercent': entry['cooperativeSharePercent'],
+          'allocationPolicyVersion': entry['allocationPolicyVersion'],
           'fareCalculationVersion': entry['fareCalculationVersion'],
         });
       }

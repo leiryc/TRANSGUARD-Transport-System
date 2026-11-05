@@ -49,4 +49,17 @@ void main() {
   test('formats fares without centavos', () {
     expect(paymentService.formatPrice(15.07), '₱15');
   });
+
+  test(
+    'allocates 30 percent of fare to cooperative and 70 percent to driver',
+    () {
+      const fare = 35.0;
+      final cooperativeShare = paymentService.calculateCooperativeShare(fare);
+      final driverAllocation = paymentService.calculateDriverAllocation(fare);
+
+      expect(cooperativeShare, 10.5);
+      expect(driverAllocation, 24.5);
+      expect(cooperativeShare + driverAllocation, fare);
+    },
+  );
 }

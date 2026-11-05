@@ -58,9 +58,7 @@ class DriverWalletScreen extends StatelessWidget {
           return RefreshIndicator(
             color: _brandGreen,
             onRefresh: () async {
-              await Future<void>.delayed(
-                const Duration(milliseconds: 300),
-              );
+              await Future<void>.delayed(const Duration(milliseconds: 300));
             },
             child: ListView(
               padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
@@ -133,7 +131,9 @@ class DriverWalletScreen extends StatelessWidget {
           const SizedBox(width: 12),
           const Expanded(
             child: Text(
-              'Collect the fare directly from the passenger in cash. This screen keeps a digital trip record only — the app does not process or transfer money.',
+              'Collect the full fare in cash. The ledger records 70% for you '
+              'and a 30% cooperative share to remit separately; the app does '
+              'not transfer or settle money.',
               style: TextStyle(
                 fontSize: 12,
                 color: Color(0xFF4A5C52),
@@ -148,14 +148,23 @@ class DriverWalletScreen extends StatelessWidget {
   }
 
   Widget _buildEarningsHeader(
-      AsyncSnapshot<List<Map<String, dynamic>>> snapshot,
-      ) {
+    AsyncSnapshot<List<Map<String, dynamic>>> snapshot,
+  ) {
     final entries = snapshot.data ?? const <Map<String, dynamic>>[];
     final total = entries.fold<double>(0, (runningTotal, entry) {
       final fare =
           entry['cashFarePhp'] ?? entry['farePhp'] ?? entry['driverCreditPhp'];
       return runningTotal + _toDouble(fare);
     });
+    final driverAllocation = entries.fold<double>(0, (total, entry) {
+      final fare =
+          entry['cashFarePhp'] ?? entry['farePhp'] ?? entry['driverCreditPhp'];
+      return total + _toDouble(entry['driverFareAllocationPhp'] ?? fare);
+    });
+    final cooperativeDue = entries.fold<double>(
+      0,
+      (total, entry) => total + _toDouble(entry['cooperativeFeePhp']),
+    );
     final count = entries.length;
 
     return Container(
@@ -215,12 +224,19 @@ class DriverWalletScreen extends StatelessWidget {
               height: 1.0,
             ),
           ),
+          const SizedBox(height: 8),
+          Text(
+            'Your allocation ${_formatPhp(driverAllocation)} · '
+            'Co-op ${_formatPhp(cooperativeDue)}',
+            style: const TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              color: Colors.white,
+            ),
+          ),
           const SizedBox(height: 12),
           Container(
-            padding: const EdgeInsets.symmetric(
-              horizontal: 12,
-              vertical: 6,
-            ),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
             decoration: BoxDecoration(
               color: Colors.white.withValues(alpha: 0.2),
               borderRadius: BorderRadius.circular(20),
@@ -252,8 +268,8 @@ class DriverWalletScreen extends StatelessWidget {
   }
 
   Widget _buildSectionHeader(
-      AsyncSnapshot<List<Map<String, dynamic>>> snapshot,
-      ) {
+    AsyncSnapshot<List<Map<String, dynamic>>> snapshot,
+  ) {
     return Row(
       children: [
         Container(
@@ -295,8 +311,8 @@ class DriverWalletScreen extends StatelessWidget {
   }
 
   List<Widget> _buildLedgerContent(
-      AsyncSnapshot<List<Map<String, dynamic>>> snapshot,
-      ) {
+    AsyncSnapshot<List<Map<String, dynamic>>> snapshot,
+  ) {
     if (snapshot.hasError) {
       return [
         _buildErrorCard('Could not load ledger entries: ${snapshot.error}'),
@@ -307,9 +323,7 @@ class DriverWalletScreen extends StatelessWidget {
       return [
         const Padding(
           padding: EdgeInsets.symmetric(vertical: 40),
-          child: Center(
-            child: CircularProgressIndicator(color: _brandGreen),
-          ),
+          child: Center(child: CircularProgressIndicator(color: _brandGreen)),
         ),
       ];
     }
@@ -337,11 +351,7 @@ class DriverWalletScreen extends StatelessWidget {
       ),
       child: Row(
         children: [
-          const Icon(
-            Icons.error_outline_rounded,
-            size: 20,
-            color: _dangerRed,
-          ),
+          const Icon(Icons.error_outline_rounded, size: 20, color: _dangerRed),
           const SizedBox(width: 12),
           Expanded(
             child: Text(
@@ -401,11 +411,7 @@ class DriverWalletScreen extends StatelessWidget {
           const Text(
             'Completed cash fare records will appear here once you finish your first ride.',
             textAlign: TextAlign.center,
-            style: TextStyle(
-              color: Colors.black54,
-              fontSize: 12,
-              height: 1.5,
-            ),
+            style: TextStyle(color: Colors.black54, fontSize: 12, height: 1.5),
           ),
         ],
       ),
@@ -415,6 +421,8 @@ class DriverWalletScreen extends StatelessWidget {
   Widget _buildLedgerCard(Map<String, dynamic> entry) {
     final fare =
         entry['cashFarePhp'] ?? entry['farePhp'] ?? entry['driverCreditPhp'];
+    final driverShare = entry['driverFareAllocationPhp'] ?? fare;
+    final cooperativeShare = entry['cooperativeFeePhp'] ?? 0;
     final isCash = entry['paymentMethod'] == 'cash';
     final rideId = entry['rideId']?.toString() ?? '—';
     final shortRideId = rideId.length > 12
@@ -447,9 +455,7 @@ class DriverWalletScreen extends StatelessWidget {
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: Icon(
-                  isCash
-                      ? Icons.payments_outlined
-                      : Icons.history_rounded,
+                  isCash ? Icons.payments_outlined : Icons.history_rounded,
                   size: 20,
                   color: _brandGreen,
                 ),
@@ -498,6 +504,16 @@ class DriverWalletScreen extends StatelessWidget {
             height: 1,
             thickness: 1,
             color: Colors.black.withValues(alpha: 0.05),
+          ),
+          const SizedBox(height: 10),
+          Text(
+            'Your allocation: ${_formatPhp(driverShare)} · '
+            'Co-op share: ${_formatPhp(cooperativeShare)}',
+            style: const TextStyle(
+              fontSize: 12,
+              color: _brandDark,
+              fontWeight: FontWeight.w600,
+            ),
           ),
           const SizedBox(height: 10),
           Row(

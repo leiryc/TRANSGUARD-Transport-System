@@ -48,6 +48,8 @@ class _PassengerHomeScreenState extends State<PassengerHomeScreen> {
   bool _isLoadingRoute = false;
   int _routeRequestVersion = 0;
   bool _isRequestingRide = false;
+  bool _isRideSheetCollapsed = false;
+  double _rideSheetDragDistance = 0;
 
   @override
   void initState() {
@@ -216,6 +218,7 @@ class _PassengerHomeScreenState extends State<PassengerHomeScreen> {
         estimatedPrice: estimatedPrice,
         distance: estimatedDistanceKm,
         createdAt: DateTime.now(),
+        passengerIdVerified: user.isIdVerified,
       );
 
       final result = await _rideService.requestRide(ride);
@@ -856,114 +859,175 @@ class _PassengerHomeScreenState extends State<PassengerHomeScreen> {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Center(
-                  child: Container(
-                    width: 40,
-                    height: 4,
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFD9E2DC),
-                      borderRadius: BorderRadius.circular(4),
-                    ),
+                GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: () => setState(
+                    () => _isRideSheetCollapsed = !_isRideSheetCollapsed,
                   ),
-                ),
-                const SizedBox(height: 16),
-                const Text(
-                  'Plan your ride',
-                  style: TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.w800,
-                    color: _brandDark,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  'Choose a stop below, then tap anywhere on the map',
-                  style: TextStyle(fontSize: 13, color: Colors.grey.shade600),
-                ),
-                const SizedBox(height: 16),
-                _buildModeSelector(),
-                const SizedBox(height: 16),
-                _LocationSummary(
-                  icon: Icons.trip_origin,
-                  color: _brandGreen,
-                  label: 'Pickup',
-                  value: _pickupController.text,
-                  isActive: _selectingPickup,
-                  onTap: () => setState(() => _selectingPickup = true),
-                ),
-                const SizedBox(height: 10),
-                _LocationSummary(
-                  icon: Icons.location_on,
-                  color: _dropoffOrange,
-                  label: 'Dropoff',
-                  value: _dropoffController.text,
-                  isActive: !_selectingPickup,
-                  onTap: () => setState(() => _selectingPickup = false),
-                ),
-                if (_isLoadingRoute) ...[
-                  const SizedBox(height: 12),
-                  const Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      SizedBox(
-                        width: 16,
-                        height: 16,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          color: _brandGreen,
-                        ),
-                      ),
-                      SizedBox(width: 8),
-                      Text(
-                        'Finding the road route…',
-                        style: TextStyle(fontSize: 12, color: Colors.black54),
-                      ),
-                    ],
-                  ),
-                ] else if (_routeError != null) ...[
-                  const SizedBox(height: 8),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          _routeError!,
-                          style: const TextStyle(
-                            fontSize: 12,
-                            color: _dangerRed,
+                  onVerticalDragStart: (_) => _rideSheetDragDistance = 0,
+                  onVerticalDragUpdate: (details) {
+                    _rideSheetDragDistance += details.primaryDelta ?? 0;
+                  },
+                  onVerticalDragEnd: (details) {
+                    final distance = _rideSheetDragDistance;
+                    _rideSheetDragDistance = 0;
+                    final velocity = details.primaryVelocity ?? 0;
+                    if (distance.abs() > 20) {
+                      setState(() => _isRideSheetCollapsed = distance > 0);
+                    } else if (velocity.abs() >= 150) {
+                      setState(() => _isRideSheetCollapsed = velocity > 0);
+                    }
+                  },
+                  child: Padding(
+                    padding: const EdgeInsets.only(bottom: 12),
+                    child: Column(
+                      children: [
+                        Center(
+                          child: Container(
+                            width: 40,
+                            height: 4,
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFD9E2DC),
+                              borderRadius: BorderRadius.circular(4),
+                            ),
                           ),
                         ),
-                      ),
-                      TextButton(
-                        onPressed: () => unawaited(_updateRoadRoute()),
-                        child: const Text('Retry'),
-                      ),
-                    ],
-                  ),
-                ] else if (_routeDistanceKm != null) ...[
-                  const SizedBox(height: 10),
-                  Text(
-                    _isFlatFareZone
-                        ? 'Both stops are inside 1 km · flat ₱15 fare'
-                        : 'Outside the 1 km zone · ${_routeDistanceKm!.toStringAsFixed(2)} road km',
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                      color: _brandDark,
+                        if (_isRideSheetCollapsed) ...[
+                          const SizedBox(height: 8),
+                          const Text(
+                            'Plan your ride · Tap or swipe up to expand',
+                            style: TextStyle(
+                              color: _brandDark,
+                              fontWeight: FontWeight.w700,
+                              fontSize: 13,
+                            ),
+                          ),
+                        ],
+                      ],
                     ),
                   ),
-                ],
-                if (_estimatedPrice != null) ...[
-                  const SizedBox(height: 14),
-                  _buildFareCard(),
-                ],
-                const SizedBox(height: 14),
-                _buildRequestButton(),
-                const SizedBox(height: 8),
-                const Text(
-                  'Road route estimates by OpenStreetMap/OSRM · Pickup within 5 km service area',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(fontSize: 10, color: Colors.black54),
+                ),
+                AnimatedSize(
+                  duration: const Duration(milliseconds: 220),
+                  curve: Curves.easeInOut,
+                  child: _isRideSheetCollapsed
+                      ? const SizedBox(width: double.infinity)
+                      : Column(
+                          mainAxisSize: MainAxisSize.min,
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            const Text(
+                              'Plan your ride',
+                              style: TextStyle(
+                                fontSize: 20,
+                                fontWeight: FontWeight.w800,
+                                color: _brandDark,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              'Choose a stop below, then tap anywhere on the map',
+                              style: TextStyle(
+                                fontSize: 13,
+                                color: Colors.grey.shade600,
+                              ),
+                            ),
+                            const SizedBox(height: 16),
+                            _buildModeSelector(),
+                            const SizedBox(height: 16),
+                            _LocationSummary(
+                              icon: Icons.trip_origin,
+                              color: _brandGreen,
+                              label: 'Pickup',
+                              value: _pickupController.text,
+                              isActive: _selectingPickup,
+                              onTap: () =>
+                                  setState(() => _selectingPickup = true),
+                            ),
+                            const SizedBox(height: 10),
+                            _LocationSummary(
+                              icon: Icons.location_on,
+                              color: _dropoffOrange,
+                              label: 'Dropoff',
+                              value: _dropoffController.text,
+                              isActive: !_selectingPickup,
+                              onTap: () =>
+                                  setState(() => _selectingPickup = false),
+                            ),
+                            if (_isLoadingRoute) ...[
+                              const SizedBox(height: 12),
+                              const Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  SizedBox(
+                                    width: 16,
+                                    height: 16,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                      color: _brandGreen,
+                                    ),
+                                  ),
+                                  SizedBox(width: 8),
+                                  Text(
+                                    'Finding the road route…',
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      color: Colors.black54,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ] else if (_routeError != null) ...[
+                              const SizedBox(height: 8),
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: Text(
+                                      _routeError!,
+                                      style: const TextStyle(
+                                        fontSize: 12,
+                                        color: _dangerRed,
+                                      ),
+                                    ),
+                                  ),
+                                  TextButton(
+                                    onPressed: () =>
+                                        unawaited(_updateRoadRoute()),
+                                    child: const Text('Retry'),
+                                  ),
+                                ],
+                              ),
+                            ] else if (_routeDistanceKm != null) ...[
+                              const SizedBox(height: 10),
+                              Text(
+                                _isFlatFareZone
+                                    ? 'Both stops are inside 1 km · flat ₱15 fare'
+                                    : 'Outside the 1 km zone · ${_routeDistanceKm!.toStringAsFixed(2)} road km',
+                                textAlign: TextAlign.center,
+                                style: const TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600,
+                                  color: _brandDark,
+                                ),
+                              ),
+                            ],
+                            if (_estimatedPrice != null) ...[
+                              const SizedBox(height: 14),
+                              _buildFareCard(),
+                            ],
+                            const SizedBox(height: 14),
+                            _buildRequestButton(),
+                            const SizedBox(height: 8),
+                            const Text(
+                              'Road route estimates by OpenStreetMap/OSRM · Pickup within 5 km service area',
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                fontSize: 10,
+                                color: Colors.black54,
+                              ),
+                            ),
+                          ],
+                        ),
                 ),
               ],
             ),

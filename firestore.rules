@@ -84,6 +84,38 @@ service cloud.firestore {
         );
     }
 
+    // Mirrors PassengerIdService.idTypes in the app.
+    function validPassengerIdType(idType) {
+      return idType in [
+        'philsys',
+        'drivers_license',
+        'passport',
+        'umid',
+        'postal',
+        'voters',
+        'prc',
+        'senior_citizen',
+        'pwd',
+        'student'
+      ];
+    }
+
+    function passengerIdAfter(userId) {
+      return getAfter(/databases/$(database)/documents/passenger_ids/$(userId)).data;
+    }
+
+    // Rides may carry passengerIdVerified: true (shown to drivers as a
+    // "Verified passenger" badge) only if the passenger's ID really is
+    // verified. Optional so older app versions can still book rides.
+    function validPassengerIdVerifiedFlag(data) {
+      return !('passengerIdVerified' in data)
+        || data.passengerIdVerified == false
+        || (
+          data.passengerIdVerified == true
+          && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('idVerificationStatus', null) == 'verified'
+        );
+    }
+
     function validLegacyFare(fare, distance) {
       return fare is number
         && distance is number
@@ -101,7 +133,7 @@ service cloud.firestore {
           && get(/databases/$(database)/documents/rides/$(get(/databases/$(database)/documents/passenger_active/$(request.auth.uid)).data.rideId)).data.driverId == userId
           && get(/databases/$(database)/documents/rides/$(get(/databases/$(database)/documents/passenger_active/$(request.auth.uid)).data.rideId)).data.status in ['accepted', 'in_progress']
         )
-        || (userRole('admin') && resource.data.userType == 'driver');
+        || (userRole('admin') && resource.data.userType in ['driver', 'passenger']);
       allow create: if signedIn()
         && request.auth.uid == userId
         && request.resource.data.userType in ['passenger', 'driver']
@@ -109,6 +141,22 @@ service cloud.firestore {
           (
             request.resource.data.userType == 'passenger'
             && request.resource.data.isApproved == true
+            && !('idReviewedAt' in request.resource.data)
+            && !('idReviewedBy' in request.resource.data)
+            && !('idRejectionReason' in request.resource.data)
+            && (
+              (
+                !('idVerificationStatus' in request.resource.data)
+                && !('idType' in request.resource.data)
+                && !('idSubmittedAt' in request.resource.data)
+              )
+              || (
+                request.resource.data.idVerificationStatus == 'pending'
+                && request.resource.data.idSubmittedAt == request.time
+                && passengerIdAfter(userId).uploadedAt == request.time
+                && request.resource.data.idType == passengerIdAfter(userId).idType
+              )
+            )
           )
           || (
             request.resource.data.userType == 'driver'
@@ -127,6 +175,57 @@ service cloud.firestore {
           && request.auth.uid == userId
           && request.resource.data.diff(resource.data).affectedKeys()
             .hasOnly(['name', 'phone', 'profileImage'])
+          // A passenger's name is locked while their ID is under review or
+          // verified, so the verified badge always matches the name on the ID.
+          && (
+            !request.resource.data.diff(resource.data).affectedKeys().hasAny(['name'])
+            || !(resource.data.get('idVerificationStatus', null) in ['pending', 'verified'])
+          )
+        )
+        || (
+          // Passenger submits an ID when none is on file or the last one was
+          // rejected. Blocked while pending so the photo can't be swapped
+          // mid-review, and blocked once verified.
+          signedIn()
+          && request.auth.uid == userId
+          && resource.data.userType == 'passenger'
+          && resource.data.get('idVerificationStatus', null) in [null, 'rejected']
+          && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly([
+              'idVerificationStatus',
+              'idType',
+              'idSubmittedAt',
+              'idRejectionReason'
+            ])
+          && request.resource.data.idVerificationStatus == 'pending'
+          && request.resource.data.idSubmittedAt == request.time
+          && !('idRejectionReason' in request.resource.data)
+          && passengerIdAfter(userId).uploadedAt == request.time
+          && request.resource.data.idType == passengerIdAfter(userId).idType
+        )
+        || (
+          // Admin verifies or rejects a pending passenger ID.
+          userRole('admin')
+          && resource.data.userType == 'passenger'
+          && resource.data.get('idVerificationStatus', null) == 'pending'
+          && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly([
+              'idVerificationStatus',
+              'idReviewedAt',
+              'idReviewedBy',
+              'idRejectionReason'
+            ])
+          && request.resource.data.idVerificationStatus in ['verified', 'rejected']
+          && request.resource.data.idReviewedAt == request.time
+          && request.resource.data.idReviewedBy == request.auth.uid
+          && (
+            !('idRejectionReason' in request.resource.data)
+            || (
+              request.resource.data.idVerificationStatus == 'rejected'
+              && request.resource.data.idRejectionReason is string
+              && request.resource.data.idRejectionReason.size() <= 200
+            )
+          )
         )
         || (
           userRole('admin')
@@ -158,6 +257,38 @@ service cloud.firestore {
             )
           )
         );
+      allow delete: if false;
+    }
+
+    // Passenger ID photos, stored as bytes. Only the owner and admins can
+    // read them. Writes must happen in the same batch as the matching
+    // users/{userId} update (see the users rules above).
+    match /passenger_ids/{userId} {
+      allow read: if (signedIn() && request.auth.uid == userId)
+        || userRole('admin');
+      allow create, update: if signedIn()
+        && request.auth.uid == userId
+        && request.resource.data.keys().hasAll([
+          'idType',
+          'image',
+          'contentType',
+          'uploadedAt'
+        ])
+        && request.resource.data.keys().hasOnly([
+          'idType',
+          'image',
+          'contentType',
+          'uploadedAt'
+        ])
+        && validPassengerIdType(request.resource.data.idType)
+        && request.resource.data.image is bytes
+        && request.resource.data.image.size() > 0
+        && request.resource.data.image.size() <= 921600
+        && request.resource.data.contentType in ['image/jpeg', 'image/png', 'image/webp']
+        && request.resource.data.uploadedAt == request.time
+        && getAfter(/databases/$(database)/documents/users/$(userId)).data.userType == 'passenger'
+        && getAfter(/databases/$(database)/documents/users/$(userId)).data.idVerificationStatus == 'pending'
+        && getAfter(/databases/$(database)/documents/users/$(userId)).data.idSubmittedAt == request.time;
       allow delete: if false;
     }
 
@@ -257,9 +388,11 @@ service cloud.firestore {
           'status',
           'dispatchState',
           'rideType',
-          'createdAt'
+          'createdAt',
+          'passengerIdVerified'
         ])
         && request.resource.data.passengerId == request.auth.uid
+        && validPassengerIdVerifiedFlag(request.resource.data)
         && request.resource.data.driverId == null
         && request.resource.data.pickupLocation is string
         && request.resource.data.pickupLocation.size() > 0
@@ -417,6 +550,52 @@ service cloud.firestore {
           )
         );
       allow delete: if false;
+    }
+
+    // Passenger-driver chat. Messages can only be sent while the driver is on
+    // the way (ride status 'accepted'). They are never edited or deleted, so
+    // admins can review them if someone reports a problem.
+    match /rides/{rideId}/messages/{messageId} {
+      function chatRide() {
+        return get(/databases/$(database)/documents/rides/$(rideId)).data;
+      }
+
+      allow read: if signedIn()
+        && (
+          chatRide().passengerId == request.auth.uid
+          || chatRide().driverId == request.auth.uid
+          || userRole('admin')
+        );
+      allow create: if signedIn()
+        && request.resource.data.keys().hasAll([
+          'senderId',
+          'senderRole',
+          'text',
+          'createdAt'
+        ])
+        && request.resource.data.keys().hasOnly([
+          'senderId',
+          'senderRole',
+          'text',
+          'createdAt'
+        ])
+        && request.resource.data.senderId == request.auth.uid
+        && request.resource.data.text is string
+        && request.resource.data.text.size() > 0
+        && request.resource.data.text.size() <= 500
+        && request.resource.data.createdAt == request.time
+        && chatRide().status == 'accepted'
+        && (
+          (
+            request.resource.data.senderRole == 'passenger'
+            && chatRide().passengerId == request.auth.uid
+          )
+          || (
+            request.resource.data.senderRole == 'driver'
+            && chatRide().driverId == request.auth.uid
+          )
+        );
+      allow update, delete: if false;
     }
 
     match /driver_presence/{driverId} {
@@ -620,6 +799,8 @@ service cloud.firestore {
           'ratePerKmPhp',
           'driverFareAllocationPhp',
           'cooperativeFeePhp',
+          'cooperativeSharePercent',
+          'allocationPolicyVersion',
           'driverCreditPhp',
           'cashFarePhp',
           'platformCreditPhp',
@@ -644,8 +825,13 @@ service cloud.firestore {
         && request.resource.data.distanceKm <= 1000
         && request.resource.data.ratePerKmPhp == 8
         && request.resource.data.driverFareAllocationPhp
+          + request.resource.data.cooperativeFeePhp
           == request.resource.data.farePhp
-        && request.resource.data.cooperativeFeePhp == 0
+        && request.resource.data.cooperativeFeePhp
+          == request.resource.data.farePhp * 0.3
+        && request.resource.data.cooperativeSharePercent == 30
+        && request.resource.data.allocationPolicyVersion
+          == 'cooperative_30_driver_70_v1'
         && request.resource.data.driverCreditPhp == 0
         && request.resource.data.cashFarePhp == request.resource.data.farePhp
         && request.resource.data.platformCreditPhp == 0

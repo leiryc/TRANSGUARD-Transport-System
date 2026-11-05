@@ -12,6 +12,7 @@ import '../../services/payment_service.dart';
 import '../../services/ride_service.dart';
 import '../../services/security_audit_service.dart';
 import '../../models/ride_model.dart';
+import '../../widgets/verified_passenger_badge.dart';
 import '../assistant_chat_screen.dart';
 import '../profile_screen.dart';
 import 'driver_wallet_screen.dart';
@@ -44,6 +45,8 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
   Position? _lastPresencePosition;
   bool _isOnline = false;
   bool _isChangingAvailability = false;
+  bool _isRideSheetCollapsed = false;
+  double _rideSheetDragDistance = 0;
 
   @override
   void initState() {
@@ -802,13 +805,21 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text(
-                        'Active ride',
-                        style: TextStyle(
-                          color: _brandDark,
-                          fontWeight: FontWeight.w800,
-                          fontSize: 14,
-                        ),
+                      Row(
+                        children: [
+                          const Text(
+                            'Active ride',
+                            style: TextStyle(
+                              color: _brandDark,
+                              fontWeight: FontWeight.w800,
+                              fontSize: 14,
+                            ),
+                          ),
+                          if (ride.passengerIdVerified) ...[
+                            const SizedBox(width: 8),
+                            const Flexible(child: VerifiedPassengerBadge()),
+                          ],
+                        ],
                       ),
                       const SizedBox(height: 2),
                       Text(
@@ -958,155 +969,205 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
               ),
             ],
           ),
-          child: snapshot.hasError
-              ? Padding(
-                  padding: const EdgeInsets.all(20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: () => setState(
+                  () => _isRideSheetCollapsed = !_isRideSheetCollapsed,
+                ),
+                onVerticalDragStart: (_) => _rideSheetDragDistance = 0,
+                onVerticalDragUpdate: (details) {
+                  _rideSheetDragDistance += details.primaryDelta ?? 0;
+                },
+                onVerticalDragEnd: (details) {
+                  final distance = _rideSheetDragDistance;
+                  _rideSheetDragDistance = 0;
+                  final velocity = details.primaryVelocity ?? 0;
+                  if (distance.abs() > 20) {
+                    setState(() => _isRideSheetCollapsed = distance > 0);
+                  } else if (velocity.abs() >= 150) {
+                    setState(() => _isRideSheetCollapsed = velocity > 0);
+                  }
+                },
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 10, 20, 10),
                   child: Column(
-                    mainAxisSize: MainAxisSize.min,
                     children: [
-                      Row(
-                        children: [
-                          const Icon(
-                            Icons.error_outline_rounded,
-                            color: _dangerRed,
-                            size: 20,
-                          ),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: Text(
-                              'Could not load ride requests: ${snapshot.error}',
-                              style: const TextStyle(fontSize: 13),
-                            ),
-                          ),
-                        ],
+                      Container(
+                        width: 40,
+                        height: 4,
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFD9E2DC),
+                          borderRadius: BorderRadius.circular(4),
+                        ),
                       ),
-                      if (!_isOnline) ...[
-                        const SizedBox(height: 12),
-                        Align(
-                          alignment: Alignment.centerRight,
-                          child: _buildGoOnlineButton(),
+                      if (_isRideSheetCollapsed) ...[
+                        const SizedBox(height: 8),
+                        Text(
+                          'Nearby ride requests (${rides.length}) · Tap or swipe up',
+                          style: const TextStyle(
+                            color: _brandDark,
+                            fontWeight: FontWeight.w700,
+                            fontSize: 13,
+                          ),
                         ),
                       ],
                     ],
                   ),
-                )
-              : Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const SizedBox(height: 10),
-                    Container(
-                      width: 40,
-                      height: 4,
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFD9E2DC),
-                        borderRadius: BorderRadius.circular(4),
-                      ),
-                    ),
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(20, 14, 20, 10),
-                      child: Row(
-                        children: [
-                          Container(
-                            width: 32,
-                            height: 32,
-                            decoration: BoxDecoration(
-                              color: _brandGreen.withValues(alpha: 0.12),
-                              borderRadius: BorderRadius.circular(10),
+                ),
+              ),
+              if (!_isRideSheetCollapsed)
+                snapshot.hasError
+                    ? Padding(
+                        padding: const EdgeInsets.all(20),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Row(
+                              children: [
+                                const Icon(
+                                  Icons.error_outline_rounded,
+                                  color: _dangerRed,
+                                  size: 20,
+                                ),
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: Text(
+                                    'Could not load ride requests: ${snapshot.error}',
+                                    style: const TextStyle(fontSize: 13),
+                                  ),
+                                ),
+                              ],
                             ),
-                            child: const Icon(
-                              Icons.list_alt_rounded,
-                              size: 18,
-                              color: _brandGreen,
-                            ),
-                          ),
-                          const SizedBox(width: 10),
-                          const Expanded(
-                            child: Text(
-                              'Nearby ride requests',
-                              style: TextStyle(
-                                fontSize: 17,
-                                fontWeight: FontWeight.w800,
-                                color: _brandDark,
-                                letterSpacing: 0.2,
+                            if (!_isOnline) ...[
+                              const SizedBox(height: 12),
+                              Align(
+                                alignment: Alignment.centerRight,
+                                child: _buildGoOnlineButton(),
                               ),
+                            ],
+                          ],
+                        ),
+                      )
+                    : Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Padding(
+                            padding: const EdgeInsets.fromLTRB(20, 14, 20, 10),
+                            child: Row(
+                              children: [
+                                Container(
+                                  width: 32,
+                                  height: 32,
+                                  decoration: BoxDecoration(
+                                    color: _brandGreen.withValues(alpha: 0.12),
+                                    borderRadius: BorderRadius.circular(10),
+                                  ),
+                                  child: const Icon(
+                                    Icons.list_alt_rounded,
+                                    size: 18,
+                                    color: _brandGreen,
+                                  ),
+                                ),
+                                const SizedBox(width: 10),
+                                const Expanded(
+                                  child: Text(
+                                    'Nearby ride requests',
+                                    style: TextStyle(
+                                      fontSize: 17,
+                                      fontWeight: FontWeight.w800,
+                                      color: _brandDark,
+                                      letterSpacing: 0.2,
+                                    ),
+                                  ),
+                                ),
+                                if (!_isOnline) _buildGoOnlineButton(),
+                                if (snapshot.connectionState ==
+                                    ConnectionState.waiting)
+                                  const SizedBox(
+                                    width: 18,
+                                    height: 18,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                      color: _brandGreen,
+                                    ),
+                                  ),
+                              ],
                             ),
                           ),
-                          if (!_isOnline) _buildGoOnlineButton(),
-                          if (snapshot.connectionState ==
-                              ConnectionState.waiting)
-                            const SizedBox(
-                              width: 18,
-                              height: 18,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                                color: _brandGreen,
+                          if (rides.isEmpty)
+                            Padding(
+                              padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
+                              child: Column(
+                                children: [
+                                  Container(
+                                    width: 56,
+                                    height: 56,
+                                    decoration: BoxDecoration(
+                                      color: _brandGreen.withValues(
+                                        alpha: 0.08,
+                                      ),
+                                      shape: BoxShape.circle,
+                                    ),
+                                    child: const Icon(
+                                      Icons.hourglass_empty_rounded,
+                                      color: _brandGreen,
+                                      size: 26,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 12),
+                                  Text(
+                                    hasRequestsOutsideRadius
+                                        ? 'No pickups within 5 km'
+                                        : 'No ride requests yet',
+                                    style: TextStyle(
+                                      fontWeight: FontWeight.w700,
+                                      fontSize: 14,
+                                      color: _brandDark,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    hasRequestsOutsideRadius
+                                        ? 'Farther requests are hidden. Nearby pickups will appear here.'
+                                        : 'Passenger pickup locations will appear here.',
+                                    textAlign: TextAlign.center,
+                                    style: TextStyle(
+                                      color: Colors.black54,
+                                      fontSize: 12,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            )
+                          else
+                            Flexible(
+                              child: ListView.separated(
+                                padding: const EdgeInsets.fromLTRB(
+                                  16,
+                                  0,
+                                  16,
+                                  16,
+                                ),
+                                shrinkWrap: true,
+                                itemCount: rides.length,
+                                separatorBuilder: (context, index) =>
+                                    const SizedBox(height: 10),
+                                itemBuilder: (context, index) {
+                                  final ride = rides[index];
+                                  return _buildRideCard(
+                                    ride,
+                                    _distanceToPickupMeters(ride)! / 1000,
+                                  );
+                                },
                               ),
                             ),
                         ],
                       ),
-                    ),
-                    if (rides.isEmpty)
-                      Padding(
-                        padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
-                        child: Column(
-                          children: [
-                            Container(
-                              width: 56,
-                              height: 56,
-                              decoration: BoxDecoration(
-                                color: _brandGreen.withValues(alpha: 0.08),
-                                shape: BoxShape.circle,
-                              ),
-                              child: const Icon(
-                                Icons.hourglass_empty_rounded,
-                                color: _brandGreen,
-                                size: 26,
-                              ),
-                            ),
-                            const SizedBox(height: 12),
-                            Text(
-                              hasRequestsOutsideRadius
-                                  ? 'No pickups within 5 km'
-                                  : 'No ride requests yet',
-                              style: TextStyle(
-                                fontWeight: FontWeight.w700,
-                                fontSize: 14,
-                                color: _brandDark,
-                              ),
-                            ),
-                            const SizedBox(height: 4),
-                            Text(
-                              hasRequestsOutsideRadius
-                                  ? 'Farther requests are hidden. Nearby pickups will appear here.'
-                                  : 'Passenger pickup locations will appear here.',
-                              textAlign: TextAlign.center,
-                              style: TextStyle(
-                                color: Colors.black54,
-                                fontSize: 12,
-                              ),
-                            ),
-                          ],
-                        ),
-                      )
-                    else
-                      Flexible(
-                        child: ListView.separated(
-                          padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-                          shrinkWrap: true,
-                          itemCount: rides.length,
-                          separatorBuilder: (context, index) =>
-                              const SizedBox(height: 10),
-                          itemBuilder: (context, index) {
-                            final ride = rides[index];
-                            return _buildRideCard(
-                              ride,
-                              _distanceToPickupMeters(ride)! / 1000,
-                            );
-                          },
-                        ),
-                      ),
-                  ],
-                ),
+            ],
+          ),
         ),
       ),
     );
@@ -1197,6 +1258,10 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
                         fontWeight: FontWeight.w700,
                       ),
                     ),
+                    if (ride.passengerIdVerified) ...[
+                      const SizedBox(height: 6),
+                      const VerifiedPassengerBadge(),
+                    ],
                   ],
                 ),
               ),

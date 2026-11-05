@@ -6,8 +6,10 @@ import '../../models/ride_model.dart';
 import '../../models/user_model.dart';
 import '../../services/auth_service.dart';
 import '../../services/driver_accreditation_service.dart';
+import '../../services/passenger_id_service.dart';
 import '../../services/ride_service.dart';
 import '../../services/security_audit_service.dart';
+import '../ride_chat_screen.dart';
 
 class AdminDashboardScreen extends StatefulWidget {
   const AdminDashboardScreen({super.key});
@@ -21,6 +23,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   final DriverAccreditationService _accreditationService =
       DriverAccreditationService();
   final SecurityAuditService _securityAuditService = SecurityAuditService();
+  final PassengerIdService _passengerIdService = PassengerIdService();
   late Future<Map<String, dynamic>> _report;
   late Future<Map<String, dynamic>> _financialReport;
 
@@ -139,6 +142,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
               const SizedBox(height: 20),
               _DriverAccreditationSection(service: _accreditationService),
               const SizedBox(height: 20),
+              _PassengerIdReviewSection(service: _passengerIdService),
+              const SizedBox(height: 20),
               _FinancialAuditSection(
                 report: _financialReport,
                 ridesByDate: ridesByDate,
@@ -230,6 +235,20 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                             '${_date(ride['createdAt'])}\n${ride['pickupLocation'] ?? ''} → ${ride['dropoffLocation'] ?? ''}',
                           ),
                           isThreeLine: true,
+                          trailing: ride['id'] is String
+                              ? IconButton(
+                                  tooltip: 'View chat',
+                                  icon: const Icon(Icons.forum_outlined),
+                                  onPressed: () => Navigator.of(context).push(
+                                    MaterialPageRoute<void>(
+                                      builder: (_) => RideChatScreen(
+                                        rideId: ride['id'] as String,
+                                        viewerRole: 'admin',
+                                      ),
+                                    ),
+                                  ),
+                                )
+                              : null,
                         ),
                       ),
                   ],
@@ -315,8 +334,9 @@ class _FinancialAuditSection extends StatelessWidget {
                 padding: EdgeInsets.symmetric(vertical: 8),
                 child: Text(
                   'Cash accounting only; no funds are processed or transferred. '
-                  'Current recorded split: driver receives the full fare; '
-                  'cooperative fee is ₱0.',
+                  'New fares are allocated 70% to the driver and 30% to the '
+                  'cooperative. The driver collects the full cash fare and '
+                  'remits the cooperative share separately.',
                 ),
               ),
               _ReportMetric(
@@ -344,7 +364,7 @@ class _FinancialAuditSection extends StatelessWidget {
                   child: Text(
                     '${data['legacyEntries']} legacy ledger entries lack one or '
                     'more split details; totals use the recorded cash fare '
-                    'and full-driver/zero-fee fallback.',
+                    'and the historical full-driver/zero-fee fallback.',
                   ),
                 ),
               const SizedBox(height: 12),
@@ -411,6 +431,7 @@ class _FinancialTransactionTile extends StatelessWidget {
     final distance = entry['distanceKm'] as num?;
     final baseFare = entry['baseFarePhp'] as num?;
     final ratePerKm = entry['ratePerKmPhp'] as num?;
+    final cooperativePercent = entry['cooperativeSharePercent'] as num? ?? 30;
     return ListTile(
       dense: true,
       leading: const Icon(Icons.receipt_long_outlined),
@@ -426,7 +447,8 @@ class _FinancialTransactionTile extends StatelessWidget {
         'Fare formula ₱${baseFare?.toStringAsFixed(2) ?? 'n/a'} base + '
         '₱${ratePerKm?.toStringAsFixed(2) ?? 'n/a'}/km\n'
         'Driver ₱${driverShare.toStringAsFixed(2)} · '
-        'Co-op ₱${coopShare.toStringAsFixed(2)}\n'
+        'Co-op (${cooperativePercent.toStringAsFixed(0)}%) '
+        '₱${coopShare.toStringAsFixed(2)}\n'
         'Formula ${entry['fareCalculationVersion'] ?? 'legacy record'}',
       ),
       isThreeLine: true,
@@ -802,6 +824,342 @@ class _DriverAccreditationCard extends StatelessWidget {
                 ),
             ],
           ),
+        ],
+      ),
+    );
+  }
+}
+
+class _PassengerIdReviewSection extends StatefulWidget {
+  const _PassengerIdReviewSection({required this.service});
+
+  final PassengerIdService service;
+
+  @override
+  State<_PassengerIdReviewSection> createState() =>
+      _PassengerIdReviewSectionState();
+}
+
+class _PassengerIdReviewSectionState extends State<_PassengerIdReviewSection> {
+  static const _emptyMessages = {
+    'pending': 'No passenger IDs waiting for review.',
+    'verified': 'No verified passengers yet.',
+    'rejected': 'No rejected IDs.',
+  };
+
+  String _status = 'pending';
+  late Stream<List<UserModel>> _passengers = widget.service
+      .watchPassengersByIdStatus(_status);
+
+  void _selectStatus(String status) {
+    if (status == _status) return;
+    setState(() {
+      _status = status;
+      _passengers = widget.service.watchPassengersByIdStatus(status);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Passenger ID verification',
+          style: Theme.of(context).textTheme.titleLarge,
+        ),
+        const SizedBox(height: 8),
+        SegmentedButton<String>(
+          showSelectedIcon: false,
+          segments: const [
+            ButtonSegment(value: 'pending', label: Text('Pending')),
+            ButtonSegment(value: 'verified', label: Text('Verified')),
+            ButtonSegment(value: 'rejected', label: Text('Rejected')),
+          ],
+          selected: {_status},
+          onSelectionChanged: (selection) => _selectStatus(selection.single),
+        ),
+        const SizedBox(height: 8),
+        StreamBuilder<List<UserModel>>(
+          // Keyed by tab so switching never shows the previous tab's list.
+          key: ValueKey(_status),
+          stream: _passengers,
+          builder: (context, snapshot) {
+            if (snapshot.hasError) {
+              return Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Text(
+                    'Could not load passenger IDs: ${snapshot.error}',
+                  ),
+                ),
+              );
+            }
+            if (!snapshot.hasData) {
+              return const Card(
+                child: Padding(
+                  padding: EdgeInsets.all(20),
+                  child: Center(child: CircularProgressIndicator()),
+                ),
+              );
+            }
+            final passengers = snapshot.data!;
+            if (passengers.isEmpty) {
+              return Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Text(_emptyMessages[_status]!),
+                ),
+              );
+            }
+            return Column(
+              children: [
+                for (final passenger in passengers)
+                  _PassengerIdCard(
+                    key: ValueKey(passenger.id),
+                    passenger: passenger,
+                    service: widget.service,
+                  ),
+              ],
+            );
+          },
+        ),
+      ],
+    );
+  }
+}
+
+class _PassengerIdCard extends StatefulWidget {
+  const _PassengerIdCard({
+    super.key,
+    required this.passenger,
+    required this.service,
+  });
+
+  final UserModel passenger;
+  final PassengerIdService service;
+
+  @override
+  State<_PassengerIdCard> createState() => _PassengerIdCardState();
+}
+
+class _PassengerIdCardState extends State<_PassengerIdCard> {
+  Future<IdImage?>? _image;
+  bool _isReviewing = false;
+
+  // Loaded on first expand so the dashboard doesn't download every photo.
+  Future<IdImage?> get _loadImage =>
+      _image ??= widget.service.loadIdImage(widget.passenger.id);
+
+  Future<void> _review({required bool verified}) async {
+    String? reason;
+    if (!verified) {
+      final controller = TextEditingController();
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Reject ID'),
+          content: TextField(
+            controller: controller,
+            maxLength: 200,
+            decoration: const InputDecoration(
+              labelText: 'Reason shown to the passenger (optional)',
+              hintText: 'e.g. Photo is blurry',
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              child: const Text('Reject'),
+            ),
+          ],
+        ),
+      );
+      reason = controller.text;
+      controller.dispose();
+      if (confirmed != true || !mounted) return;
+    }
+
+    setState(() => _isReviewing = true);
+    try {
+      await widget.service.review(
+        widget.passenger.id,
+        verified: verified,
+        rejectionReason: reason,
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(verified ? 'Passenger verified.' : 'ID rejected.'),
+        ),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      setState(() => _isReviewing = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not save the review: $error')),
+      );
+    }
+  }
+
+  void _openFullScreen(IdImage image) {
+    showDialog<void>(
+      context: context,
+      builder: (context) => Dialog.fullscreen(
+        backgroundColor: Colors.black,
+        child: Stack(
+          children: [
+            Positioned.fill(
+              child: InteractiveViewer(
+                maxScale: 5,
+                child: Center(child: Image.memory(image.bytes)),
+              ),
+            ),
+            SafeArea(
+              child: IconButton(
+                tooltip: 'Close',
+                color: Colors.white,
+                onPressed: () => Navigator.of(context).pop(),
+                icon: const Icon(Icons.close),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  String _formatDate(DateTime date) {
+    final localizations = MaterialLocalizations.of(context);
+    return '${localizations.formatMediumDate(date)}, '
+        '${localizations.formatTimeOfDay(TimeOfDay.fromDateTime(date))}';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final passenger = widget.passenger;
+    final status = passenger.idVerificationStatus;
+    final isPending = status == 'pending';
+    final (IconData icon, Color color, String dateLabel, DateTime? date) =
+        switch (status) {
+          'verified' => (
+            Icons.verified_user,
+            const Color(0xFF168A5B),
+            'Verified',
+            passenger.idReviewedAt,
+          ),
+          'rejected' => (
+            Icons.gpp_bad_outlined,
+            const Color(0xFFD64545),
+            'Rejected',
+            passenger.idReviewedAt,
+          ),
+          _ => (
+            Icons.badge_outlined,
+            const Color(0xFFB7791F),
+            'Submitted',
+            passenger.idSubmittedAt,
+          ),
+        };
+    final rejectionReason = passenger.idRejectionReason?.trim() ?? '';
+    return Card(
+      child: ExpansionTile(
+        leading: Icon(icon, color: color),
+        title: Text(passenger.name.isEmpty ? 'Passenger' : passenger.name),
+        subtitle: Text(
+          '${PassengerIdService.labelFor(passenger.idType)} · '
+          '${passenger.email}'
+          '${date == null ? '' : '\n$dateLabel ${_formatDate(date)}'}',
+        ),
+        childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+        children: [
+          Align(
+            alignment: Alignment.centerLeft,
+            child: Text(
+              'Phone: ${passenger.phone.isEmpty ? 'Not provided' : passenger.phone}',
+            ),
+          ),
+          if (status == 'rejected') ...[
+            const SizedBox(height: 4),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: Text(
+                'Reason: '
+                '${rejectionReason.isEmpty ? 'None given' : rejectionReason}',
+              ),
+            ),
+          ],
+          const SizedBox(height: 10),
+          FutureBuilder<IdImage?>(
+            future: _loadImage,
+            builder: (context, snapshot) {
+              if (snapshot.connectionState != ConnectionState.done) {
+                return const SizedBox(
+                  height: 160,
+                  child: Center(child: CircularProgressIndicator()),
+                );
+              }
+              final image = snapshot.data;
+              if (snapshot.hasError || image == null) {
+                return Text(
+                  snapshot.hasError
+                      ? 'Could not load the ID photo: ${snapshot.error}'
+                      : 'No ID photo found for this passenger.',
+                );
+              }
+              return InkWell(
+                onTap: () => _openFullScreen(image),
+                borderRadius: BorderRadius.circular(12),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(12),
+                  child: Image.memory(
+                    image.bytes,
+                    height: 200,
+                    width: double.infinity,
+                    fit: BoxFit.contain,
+                  ),
+                ),
+              );
+            },
+          ),
+          const SizedBox(height: 4),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: Text(
+              isPending
+                  ? 'Tap the photo to zoom. Check that the name matches the '
+                        'account.'
+                  : 'Tap the photo to zoom.',
+              style: const TextStyle(fontSize: 12, color: Colors.black54),
+            ),
+          ),
+          if (isPending) ...[
+            const SizedBox(height: 10),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                FilledButton.icon(
+                  onPressed: _isReviewing
+                      ? null
+                      : () => _review(verified: true),
+                  icon: const Icon(Icons.verified_outlined),
+                  label: const Text('Verify'),
+                ),
+                OutlinedButton.icon(
+                  onPressed: _isReviewing
+                      ? null
+                      : () => _review(verified: false),
+                  icon: const Icon(Icons.close),
+                  label: const Text('Reject'),
+                ),
+              ],
+            ),
+          ],
         ],
       ),
     );

@@ -4,6 +4,10 @@ class PaymentService {
   static const double baseFarePhp = 15;
   static const double perKilometerPhp = 8;
   static const double flatFareRadiusKm = 1;
+  static const int cooperativeSharePercent = 30;
+  static const double cooperativeShareRate = 0.30;
+  static const String fareAllocationPolicyVersion =
+      'cooperative_30_driver_70_v1';
   static const String flatFareBasis =
       'base15_flat_inside_1km_plus8_per_km_outside_v1';
   static const String flatFareCalculationVersion =
@@ -53,6 +57,12 @@ class PaymentService {
         : baseFarePhp + perKilometerPhp * distanceKm;
     return fare.roundToDouble();
   }
+
+  double calculateCooperativeShare(double farePhp) =>
+      farePhp * cooperativeShareRate;
+
+  double calculateDriverAllocation(double farePhp) =>
+      farePhp - calculateCooperativeShare(farePhp);
 
   // Calculate estimated time (in minutes)
   double calculateEstimatedTime(double distanceKm) {
