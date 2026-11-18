@@ -60,7 +60,6 @@ class RideService {
         'distance': distanceKm,
         'status': 'requested',
         'dispatchState': 'queued',
-        'rideType': ride.rideType,
         'createdAt': FieldValue.serverTimestamp(),
         'passengerIdVerified': ride.passengerIdVerified,
       });
@@ -661,11 +660,6 @@ class RideService {
     final todayDateKey =
         '${now.year.toString().padLeft(4, '0')}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
     final cutoff = now.subtract(const Duration(days: 35));
-    final trainingCutoff = DateTime.utc(
-      now.year,
-      now.month,
-      now.day,
-    ).subtract(const Duration(days: 35));
     final snapshot = await _firestore
         .collection('rides')
         .where('createdAt', isGreaterThanOrEqualTo: Timestamp.fromDate(cutoff))
@@ -692,7 +686,6 @@ class RideService {
     var completedCashFarePhp = 0.0;
     DateTime? oldestIncludedRideAt;
     final reportCapped = snapshot.size > 1000;
-    final trainingRequestsByDateHour = <String, int>{};
 
     for (final document in snapshot.docs.take(1000)) {
       final data = document.data();
@@ -709,9 +702,6 @@ class RideService {
       }
       final dateKey =
           '${created.year.toString().padLeft(4, '0')}-${created.month.toString().padLeft(2, '0')}-${created.day.toString().padLeft(2, '0')}';
-      final trainingHourKey = '$dateKey-${created.hour}';
-      trainingRequestsByDateHour[trainingHourKey] =
-          (trainingRequestsByDateHour[trainingHourKey] ?? 0) + 1;
       ridesByDate[dateKey] = (ridesByDate[dateKey] ?? 0) + 1;
       if (dateKey == todayDateKey) {
         todayHourlyRequests[created.hour]++;
@@ -933,13 +923,6 @@ class RideService {
         'No valid pickup coordinates were available to rank approximate demand zones.',
       );
     }
-    final mlDemandForecast = _buildDemandPrediction(
-      now: now,
-      trainingCutoff: trainingCutoff,
-      trainingCapped: reportCapped,
-      oldestTrainingRideAt: oldestIncludedRideAt,
-      requestsByDateHour: trainingRequestsByDateHour,
-    );
     return {
       'periodDays': 35,
       'totalRides': snapshot.size > 1000 ? 1000 : snapshot.size,
@@ -963,143 +946,14 @@ class RideService {
         'todayHourlyTrend': todayHourlyTrend,
         'topDemandZones': demandZones,
         'recommendations': recommendations,
-        'mlDemandForecast': mlDemandForecast,
         'method':
-            'Historical zone trends use weekday-matched averages; the separate '
-            'next-24-hour forecast uses regularized seasonal regression trained '
-            'on the same recent ride records used by this report.',
+            'Historical demand outlook: weekday-matched averages and pickup-grid '
+            'totals computed from the recent ride records in this report.',
       },
       'ridesByDate': ridesByDate,
       'capped': reportCapped,
       'recentRides': recentRides,
     };
-  }
-
-  Map<String, dynamic> _buildDemandPrediction({
-    required DateTime now,
-    required DateTime trainingCutoff,
-    required bool trainingCapped,
-    required DateTime? oldestTrainingRideAt,
-    required Map<String, int> requestsByDateHour,
-  }) {
-    final today = DateTime.utc(now.year, now.month, now.day);
-    final trainingStart = trainingCapped && oldestTrainingRideAt != null
-        ? DateTime.utc(
-            oldestTrainingRideAt.year,
-            oldestTrainingRideAt.month,
-            oldestTrainingRideAt.day,
-          ).add(const Duration(days: 1))
-        : trainingCutoff.add(const Duration(days: 1));
-    final trainingEnd = today.subtract(const Duration(days: 1));
-    final trainingDays = trainingEnd.difference(trainingStart).inDays + 1;
-    if (trainingDays < 28) {
-      return {
-        'available': false,
-        'reason':
-            'At least 28 days of ride history are needed to train a forecast.',
-        'trainingDays': trainingDays < 0 ? 0 : trainingDays,
-        'trainingRideCount': 0,
-        'trainingCapped': trainingCapped,
-      };
-    }
-
-    final examples = <({List<double> features, double target})>[];
-    var includedTrainingRideCount = 0;
-    for (var dayOffset = 0; dayOffset < trainingDays; dayOffset++) {
-      final date = trainingStart.add(Duration(days: dayOffset));
-      final dateKey =
-          '${date.year.toString().padLeft(4, '0')}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
-      for (var hour = 0; hour < 24; hour++) {
-        final rideCount = requestsByDateHour['$dateKey-$hour'] ?? 0;
-        includedTrainingRideCount += rideCount;
-        examples.add((
-          features: _demandModelFeatures(date, hour),
-          target: rideCount.toDouble(),
-        ));
-      }
-    }
-    if (includedTrainingRideCount < 30) {
-      return {
-        'available': false,
-        'reason': 'At least 30 recorded rides are needed to train a forecast.',
-        'trainingDays': trainingDays,
-        'trainingRideCount': includedTrainingRideCount,
-        'trainingCapped': trainingCapped,
-      };
-    }
-
-    final weights = List<double>.filled(8, 0);
-    weights[0] =
-        examples.fold<double>(0, (total, sample) => total + sample.target) /
-        examples.length;
-    const learningRate = 0.04;
-    const regularization = 0.02;
-    for (var iteration = 0; iteration < 600; iteration++) {
-      final gradients = List<double>.filled(weights.length, 0);
-      for (final sample in examples) {
-        var prediction = 0.0;
-        for (var feature = 0; feature < weights.length; feature++) {
-          prediction += weights[feature] * sample.features[feature];
-        }
-        final error = prediction - sample.target;
-        for (var feature = 0; feature < weights.length; feature++) {
-          gradients[feature] += error * sample.features[feature];
-        }
-      }
-      for (var feature = 0; feature < weights.length; feature++) {
-        final gradient =
-            gradients[feature] / examples.length +
-            (feature == 0 ? 0 : regularization * weights[feature]);
-        weights[feature] -= learningRate * gradient;
-      }
-    }
-
-    final firstForecastHour = DateTime.utc(
-      now.year,
-      now.month,
-      now.day,
-      now.hour,
-    ).add(const Duration(hours: 1));
-    final predictions = List<Map<String, dynamic>>.generate(24, (index) {
-      final dateTime = firstForecastHour.add(Duration(hours: index));
-      final features = _demandModelFeatures(dateTime, dateTime.hour);
-      var predictedRequests = 0.0;
-      for (var feature = 0; feature < weights.length; feature++) {
-        predictedRequests += weights[feature] * features[feature];
-      }
-      return {
-        'timestamp': dateTime.toIso8601String(),
-        'hour': dateTime.hour,
-        'label':
-            '${dateTime.month.toString().padLeft(2, '0')}/${dateTime.day.toString().padLeft(2, '0')} '
-            '${dateTime.hour.toString().padLeft(2, '0')}:00',
-        'predictedRequests': predictedRequests.clamp(0.0, double.infinity),
-      };
-    });
-    return {
-      'available': true,
-      'model': 'Regularized seasonal regression',
-      'trainingDays': trainingDays,
-      'trainingRideCount': includedTrainingRideCount,
-      'trainingCapped': trainingCapped,
-      'forecastStart': firstForecastHour.toIso8601String(),
-      'predictions': predictions,
-    };
-  }
-
-  List<double> _demandModelFeatures(DateTime date, int hour) {
-    final dailyAngle = 2 * pi * hour / 24;
-    final weeklyAngle = 2 * pi * (date.weekday - 1) / 7;
-    return [
-      1,
-      sin(dailyAngle),
-      cos(dailyAngle),
-      sin(2 * dailyAngle),
-      cos(2 * dailyAngle),
-      sin(weeklyAngle),
-      cos(weeklyAngle),
-      date.weekday >= DateTime.saturday ? 1 : 0,
-    ];
   }
 
   // Get available rides for drivers

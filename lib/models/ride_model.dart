@@ -16,7 +16,6 @@ class RideModel {
   final String currency;
   final String
   status; // 'requested', 'accepted', 'in_progress', 'completed', 'cancelled'
-  final String rideType; // 'economy', 'comfort', 'premium'
   final DateTime createdAt;
   final DateTime? startTime;
   final DateTime? endTime;
@@ -52,7 +51,6 @@ class RideModel {
     this.finalPrice,
     this.currency = 'PHP',
     this.status = 'requested',
-    this.rideType = 'economy',
     required this.createdAt,
     this.startTime,
     this.endTime,
@@ -89,7 +87,6 @@ class RideModel {
       finalPrice: data['finalPrice']?.toDouble(),
       currency: data['currency'] ?? 'PHP',
       status: data['status'] ?? 'requested',
-      rideType: data['rideType'] ?? 'economy',
       createdAt: (data['createdAt'] as Timestamp).toDate(),
       startTime: data['startTime'] != null
           ? (data['startTime'] as Timestamp).toDate()
@@ -137,7 +134,6 @@ class RideModel {
       'finalPrice': finalPrice,
       'currency': currency,
       'status': status,
-      'rideType': rideType,
       'createdAt': Timestamp.fromDate(createdAt),
       'startTime': startTime != null ? Timestamp.fromDate(startTime!) : null,
       'endTime': endTime != null ? Timestamp.fromDate(endTime!) : null,

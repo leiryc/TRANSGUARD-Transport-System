@@ -527,7 +527,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
         children: [
           _buildGroupedAction(
             tooltip: 'Ask TRANSGUARD Help',
-            icon: Icons.auto_awesome_outlined,
+            icon: Icons.help_outline_rounded,
             onPressed: () => Navigator.of(context).push(
               MaterialPageRoute(
                 builder: (_) => const AssistantChatScreen(userRole: 'driver'),

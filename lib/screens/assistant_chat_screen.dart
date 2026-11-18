@@ -51,7 +51,8 @@ Confirmed app facts:
 - Fare is ₱15 when both stops are within 1 km of the town-center reference point. Otherwise, it is ₱15 plus ₱8 per road-route kilometer, rounded to the nearest whole peso for display and fare calculation. The app records cash collection; it does not process online payments or transfer money.
 - A passenger-generated temporary trip QR is used once by the driver before starting the trip. It is a coordination feature, not proof of identity or secure payment verification.
 - Driver GPS checks look for platform-reported mock locations, stale or inaccurate fixes, invalid coordinates, or implausible speed/jumps. These are client-side heuristics, may produce false positives or miss spoofing, and are not Firebase-confirmed proof.
-- The administrator dashboard shows actual ride activity from Firestore, historical weekday/hour averages, approximate pickup-grid summaries, and a separate next-24-hour regularized seasonal regression forecast trained from recent ride timestamps when at least 28 days and 30 rides are available. Predictions are estimates, not guarantees; historical surge indicators are heuristic, not AI/ML.
+- The administrator dashboard shows actual ride activity from Firestore, historical weekday/hour averages, and approximate pickup-grid summaries. These are plain statistics from recorded rides, not predictions or AI/ML; historical surge indicators are simple heuristics.
+- If asked what you are or whether TRANSGUARD uses AI: you are TRANSGUARD Help, an in-app help chatbot powered by Google Gemini. You only answer questions about the app and do not make decisions or take any action in it. Fares, ride requests, driver approval, passenger ID checks, GPS checks, and admin reports work through fixed app rules, administrator review, and plain statistics, not AI.
 - You cannot inspect the user's account, current ride, payment, driver, GPS, Firestore records, or app installation, and cannot perform actions in the app. Do not imply otherwise.
 
 Stay within TRANSGUARD topics. For unrelated questions, briefly say you can only help with TRANSGUARD. Never request passwords, payment-card details, or authentication codes. For emergencies, tell the user to contact local emergency services directly.
@@ -121,8 +122,7 @@ Stay within TRANSGUARD topics. For unrelated questions, briefly say you can only
           _ChatMessage(
             text:
                 'The assistant did not respond within 90 seconds. Check your '
-                'internet connection and Firebase AI availability, then tap '
-                'Retry.',
+                'internet connection, then tap Retry.',
             isUser: false,
             isError: true,
             retryPrompt: text,
@@ -208,7 +208,7 @@ Stay within TRANSGUARD topics. For unrelated questions, briefly say you can only
       responseBody = jsonDecode(response.body);
     } on FormatException {
       throw StateError(
-        'Firebase AI returned an unreadable response '
+        'The help service returned an unreadable response '
         '(${response.statusCode}).',
       );
     }
@@ -219,12 +219,12 @@ Stay within TRANSGUARD topics. For unrelated questions, briefly say you can only
         if (error is Map) details = error['message'];
       }
       throw StateError(
-        'Firebase AI request failed (${response.statusCode}): '
+        'The help service request failed (${response.statusCode}): '
         '${details ?? 'No further details were provided.'}',
       );
     }
     if (responseBody is! Map) {
-      throw StateError('Firebase AI returned an invalid response.');
+      throw StateError('The help service returned an invalid response.');
     }
     final candidates = responseBody['candidates'];
     List? parts;
@@ -531,44 +531,50 @@ When a ride is active, tap its “Active ride” card to view or track it. If no
               ],
             ),
             child: const Icon(
-              Icons.auto_awesome_rounded,
+              Icons.question_answer_rounded,
               size: 20,
               color: Colors.white,
             ),
           ),
           const SizedBox(width: 12),
-          const Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                'TRANSGUARD Help',
-                style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w800,
-                  color: _brandDark,
-                  letterSpacing: 0.2,
-                  height: 1.2,
-                ),
-              ),
-              SizedBox(height: 2),
-              Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  _StatusDot(),
-                  SizedBox(width: 5),
-                  Text(
-                    'AI assistant',
-                    style: TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w500,
-                      color: Colors.black54,
-                      height: 1.2,
-                    ),
+          const Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  'TRANSGUARD Help',
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w800,
+                    color: _brandDark,
+                    letterSpacing: 0.2,
+                    height: 1.2,
                   ),
-                ],
-              ),
-            ],
+                ),
+                SizedBox(height: 2),
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    _StatusDot(),
+                    SizedBox(width: 5),
+                    Flexible(
+                      child: Text(
+                        'Help chatbot · powered by Google Gemini',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w500,
+                          color: Colors.black54,
+                          height: 1.2,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
           ),
         ],
       ),
@@ -931,7 +937,7 @@ class _AssistantAvatar extends StatelessWidget {
         shape: BoxShape.circle,
       ),
       child: const Icon(
-        Icons.auto_awesome_rounded,
+        Icons.question_answer_rounded,
         size: 14,
         color: Colors.white,
       ),

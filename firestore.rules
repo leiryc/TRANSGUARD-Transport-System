@@ -368,7 +368,6 @@ service cloud.firestore {
           'distance',
           'status',
           'dispatchState',
-          'rideType',
           'createdAt'
         ])
         && request.resource.data.keys().hasOnly([
@@ -387,7 +386,6 @@ service cloud.firestore {
           'distance',
           'status',
           'dispatchState',
-          'rideType',
           'createdAt',
           'passengerIdVerified'
         ])
@@ -413,7 +411,6 @@ service cloud.firestore {
         && request.resource.data.fareBasis == 'base15_flat_inside_1km_plus8_per_km_outside_v1'
         && request.resource.data.status == 'requested'
         && request.resource.data.dispatchState == 'queued'
-        && request.resource.data.rideType in ['economy', 'comfort', 'premium']
         && request.resource.data.createdAt == request.time
         && !exists(/databases/$(database)/documents/passenger_active/$(request.auth.uid))
         && getAfter(/databases/$(database)/documents/passenger_active/$(request.auth.uid)).data.rideId == rideId;
@@ -774,11 +771,6 @@ service cloud.firestore {
           )
         );
       allow update: if false;
-    }
-
-    match /wallets/{userId} {
-      allow read: if signedIn() && request.auth.uid == userId;
-      allow write: if false;
     }
 
     match /wallet_ledger/{entryId} {

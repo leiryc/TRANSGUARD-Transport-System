@@ -42,7 +42,6 @@ dependencies:
   cloud_firestore: ^7.0.0
   firebase_ai: ^5.0.0
   cloud_functions: ^7.0.0
-  firebase_messaging: ^17.0.0
   
   # Maps and Location
   google_maps_flutter: ^2.12.3

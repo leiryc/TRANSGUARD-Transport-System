@@ -9,7 +9,6 @@ A comprehensive Flutter-based ride-hailing application with Firebase backend, su
 - **Ride Booking**: Request rides with pickup and dropoff locations
 - **Road Routing**: Passenger pickup and dropoff selections are connected with a road-following route; displayed road distance drives the fare estimate
 - **Location Search**: Auto-detect current location or search for addresses
-- **Ride Types**: Choose from Economy, Comfort, and Premium rides
 - **Price Estimation**: Real-time price calculation based on distance
 - **Ride Tracking**: Live tracking of driver and ride status
 - **Ride History**: View completed rides and statistics
@@ -182,7 +181,6 @@ lib/
   estimatedPrice: number
   finalPrice: number (optional)
   status: string ('requested' | 'accepted' | 'in_progress' | 'completed' | 'cancelled')
-  rideType: string ('economy' | 'comfort' | 'premium')
   createdAt: timestamp
   startTime: timestamp (optional)
   endTime: timestamp (optional)
@@ -201,13 +199,12 @@ lib/
 1. Sign up with email and password
 2. Select "Passenger" as user type
 3. On home screen, enter pickup and dropoff locations
-4. Choose ride type (Economy, Comfort, Premium)
-5. View estimated price
-6. Click "Request Ride"
-7. Wait for driver to accept
-8. Track driver's real-time location
-9. Complete the ride
-10. Rate the driver
+4. View estimated price
+5. Click "Request Ride"
+6. Wait for driver to accept
+7. Track driver's real-time location
+8. Complete the ride
+9. Rate the driver
 
 ### For Drivers
 1. Sign up with email and password

@@ -1287,34 +1287,6 @@ class _DemandOutlook extends StatelessWidget {
         .whereType<Map>()
         .map((hour) => Map<String, dynamic>.from(hour))
         .toList();
-    final mlForecast = Map<String, dynamic>.from(
-      forecast['mlDemandForecast'] as Map? ?? const {},
-    );
-    final mlPredictions = (mlForecast['predictions'] as List? ?? const [])
-        .whereType<Map>()
-        .map((prediction) => Map<String, dynamic>.from(prediction))
-        .toList();
-    final mlValues = mlPredictions
-        .map(
-          (prediction) =>
-              (prediction['predictedRequests'] as num? ?? 0).toDouble(),
-        )
-        .toList();
-    final mlTotal = mlValues.fold<double>(0, (total, value) => total + value);
-    final peakForecast = mlPredictions.isEmpty
-        ? null
-        : mlPredictions.reduce(
-            (a, b) =>
-                (a['predictedRequests'] as num).compareTo(
-                      b['predictedRequests'] as num,
-                    ) >=
-                    0
-                ? a
-                : b,
-          );
-    final forecastStart = DateTime.tryParse(
-      mlForecast['forecastStart']?.toString() ?? '',
-    );
     final demandZones = (forecast['topDemandZones'] as List? ?? const [])
         .whereType<Map>()
         .map((zone) => Map<String, dynamic>.from(zone))
@@ -1438,67 +1410,9 @@ class _DemandOutlook extends StatelessWidget {
             Text(
               'The highlighted line shows actual rides recorded today. Other '
               'lines show weekday-matched historical hourly averages for the '
-              'top pickup grids. The ML forecast below is a separate model '
-              'trained from recorded rides.',
+              'top pickup grids.',
               style: theme.textTheme.bodySmall,
             ),
-            const SizedBox(height: 18),
-            Text(
-              'AI/ML demand prediction · next 24 hours',
-              style: theme.textTheme.titleSmall,
-            ),
-            const SizedBox(height: 4),
-            if (mlForecast['available'] != true)
-              Text(
-                mlForecast['reason']?.toString() ?? 'A forecast is unavailable until sufficient ride history is available.',
-                style: theme.textTheme.bodySmall,
-              )
-            else ...[
-              Text(
-                'Model: ${mlForecast['model']} · trained on '
-                '${mlForecast['trainingRideCount']} rides across '
-                '${mlForecast['trainingDays']} days · UTC',
-                style: theme.textTheme.bodySmall,
-              ),
-              if (mlForecast['trainingCapped'] == true)
-                Padding(
-                  padding: const EdgeInsets.only(top: 4),
-                  child: Text(
-                    'Training data is limited to the latest 1,000 rides included in the report.',
-                    style: theme.textTheme.bodySmall,
-                  ),
-                ),
-              const SizedBox(height: 8),
-              Text(
-                'Expected total: ${mlTotal.toStringAsFixed(1)} rides'
-                '${peakForecast == null ? '' : ' · busiest hour: ${peakForecast['label']} (${(peakForecast['predictedRequests'] as num).toStringAsFixed(1)} expected)'}.',
-                style: const TextStyle(fontWeight: FontWeight.w600),
-              ),
-              if (mlValues.isNotEmpty)
-                Semantics(
-                  label: 'Machine learning prediction of expected ride requests during each of the next 24 hours.',
-                  child: SizedBox(
-                    height: 180,
-                    width: double.infinity,
-                    child: CustomPaint(
-                      painter: _HourlyDemandPainter(
-                        series: [
-                          {'label': 'ML predicted rides', 'values': mlValues},
-                        ],
-                        colors: [theme.colorScheme.tertiary],
-                        gridColor: theme.dividerColor,
-                        labelColor: theme.colorScheme.onSurfaceVariant,
-                        startHour: forecastStart?.hour ?? 0,
-                      ),
-                    ),
-                  ),
-                ),
-              if (forecastStart != null)
-                Text(
-                  'Forecast begins ${forecastStart.month.toString().padLeft(2, '0')}/${forecastStart.day.toString().padLeft(2, '0')} at ${forecastStart.hour.toString().padLeft(2, '0')}:00 UTC. Predictions are estimates, not guarantees.',
-                  style: theme.textTheme.bodySmall,
-                ),
-            ],
             const SizedBox(height: 16),
             Text(
               'Highest-demand approximate pickup grids',
@@ -1614,14 +1528,12 @@ class _HourlyDemandPainter extends CustomPainter {
     required this.colors,
     required this.gridColor,
     required this.labelColor,
-    this.startHour = 0,
   });
 
   final List<Map<String, dynamic>> series;
   final List<Color> colors;
   final Color gridColor;
   final Color labelColor;
-  final int startHour;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -1690,10 +1602,9 @@ class _HourlyDemandPainter extends CustomPainter {
     }
 
     for (final hour in const [0, 6, 12, 18, 23]) {
-      final displayedHour = (startHour + hour) % 24;
       final textPainter = TextPainter(
         text: TextSpan(
-          text: displayedHour.toString().padLeft(2, '0'),
+          text: hour.toString().padLeft(2, '0'),
           style: textStyle,
         ),
         textDirection: TextDirection.ltr,
@@ -1714,6 +1625,5 @@ class _HourlyDemandPainter extends CustomPainter {
       oldDelegate.series != series ||
       oldDelegate.colors != colors ||
       oldDelegate.gridColor != gridColor ||
-      oldDelegate.labelColor != labelColor ||
-      oldDelegate.startHour != startHour;
+      oldDelegate.labelColor != labelColor;
 }

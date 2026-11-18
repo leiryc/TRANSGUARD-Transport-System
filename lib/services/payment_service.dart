@@ -75,27 +75,4 @@ class PaymentService {
   String formatPrice(double price) {
     return '₱${price.round()}';
   }
-
-  // Get ride type details
-  Map<String, dynamic> getRideTypeDetails(String rideType) {
-    const Map<String, Map<String, dynamic>> rideTypes = {
-      'economy': {
-        'name': 'Economy',
-        'description': 'Affordable and reliable',
-        'seats': 4,
-      },
-      'comfort': {
-        'name': 'Comfort',
-        'description': 'More space and comfort',
-        'seats': 4,
-      },
-      'premium': {
-        'name': 'Premium',
-        'description': 'Luxury and premium service',
-        'seats': 4,
-      },
-    };
-
-    return rideTypes[rideType] ?? rideTypes['economy']!;
-  }
 }
