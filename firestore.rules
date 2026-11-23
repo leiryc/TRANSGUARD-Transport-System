@@ -78,8 +78,7 @@ service cloud.firestore {
           (isWithinFlatFareZone(data) && data.estimatedPrice == 15)
           || (
             !isWithinFlatFareZone(data)
-            && data.estimatedPrice >= 15 + (8 * data.distance) - 0.005
-            && data.estimatedPrice <= 15 + (8 * data.distance) + 0.005
+            && data.estimatedPrice == math.round(15 + (8 * data.distance))
           )
         );
     }
