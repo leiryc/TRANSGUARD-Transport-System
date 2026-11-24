@@ -1386,7 +1386,7 @@ class _RideTrackingScreenState extends State<RideTrackingScreen> {
             if (ride.distance != null)
               _buildReceiptRow(
                 'Distance',
-                '${ride.distance!.toStringAsFixed(2)} km (straight-line)',
+                _receiptDistance(ride),
               ),
             _buildReceiptRow(
               'Fare',
@@ -1459,13 +1459,21 @@ class _RideTrackingScreenState extends State<RideTrackingScreen> {
     );
   }
 
+  /// Current rides store the road-route distance; rides priced with an older
+  /// fare basis (or none) used straight-line distance.
+  String _receiptDistance(RideModel ride) {
+    final km = ride.distance!.toStringAsFixed(2);
+    return ride.fareBasis == PaymentService.flatFareBasis
+        ? '$km road km'
+        : '$km km (straight-line)';
+  }
+
   Future<void> _copyReceipt(RideModel ride) async {
     final receipt = [
       'TRANSGUARD RIDE RECEIPT',
       'Receipt: ${ride.id}',
       'Route: ${ride.pickupLocation} -> ${ride.dropoffLocation}',
-      if (ride.distance != null)
-        'Distance: ${ride.distance!.toStringAsFixed(2)} km (straight-line)',
+      if (ride.distance != null) 'Distance: ${_receiptDistance(ride)}',
       'Fare: ${PaymentService().formatPrice(ride.finalPrice ?? ride.estimatedPrice)}',
       'Payment: Cash; driver confirmation ${ride.cashCollectedByDriver ? 'recorded' : 'not recorded'}',
       'Completed: ${ride.endTime?.toLocal().toString() ?? 'time unavailable'}',

@@ -34,6 +34,10 @@ class RideModel {
   // Snapshot of the passenger's ID verification when the ride was requested.
   // Firestore rules only accept true if the passenger's ID is verified.
   final bool passengerIdVerified;
+  // How the fare and distance were calculated, e.g. the current road-route
+  // basis or the legacy straight-line 'base_plus_distance'. Null on very old
+  // rides, which predate road routing.
+  final String? fareBasis;
   final bool isFromCache;
 
   RideModel({
@@ -67,6 +71,7 @@ class RideModel {
     this.paymentMethod,
     this.cashCollectedByDriver = false,
     this.passengerIdVerified = false,
+    this.fareBasis,
     this.isFromCache = false,
   });
 
@@ -115,6 +120,7 @@ class RideModel {
       paymentMethod: data['paymentMethod'] as String?,
       cashCollectedByDriver: data['cashCollectedByDriver'] == true,
       passengerIdVerified: data['passengerIdVerified'] == true,
+      fareBasis: data['fareBasis'] as String?,
       isFromCache: doc.metadata.isFromCache,
     );
   }
